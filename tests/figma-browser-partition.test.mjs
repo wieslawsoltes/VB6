@@ -31,7 +31,7 @@ def selected(namespace, engine, origin, shard='', gpu=''):
         except ValueError as error:
             return {'error': str(error)}
 
-for group in ('figma-authoring', 'figma-services'):
+for group in ('figma-workspace', 'figma-authoring', 'figma-services'):
     for script in suites[group]:
         path = Path('tools') / script
         tree = ast.parse(path.read_text())
@@ -123,12 +123,12 @@ for (const suite of evidence.discovery) {
     });
 }
 
-for (const [group, count] of [['figma-authoring', 43], ['figma-services', 32]]) {
+for (const [group, count] of [['figma-workspace', 22], ['figma-authoring', 21], ['figma-services', 32]]) {
     test(`${group} retains its complete ${count}-case inventory`, () => {
         const suites = evidence.discovery.filter(suite => suite.group === group);
         assert.equal(suites.reduce((total, suite) => total + suite.inventory.length, 0), count);
         for (let shard = 0; shard < 3; shard++) {
-            assert.ok(suites.some(suite => suite.shards[shard].names?.length), 'each workflow shard must own actual tests');
+            assert.ok(suites.some(suite => suite.shards[shard].names?.length), 'each local shard must own actual tests');
         }
     });
 }

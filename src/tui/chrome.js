@@ -54,7 +54,15 @@ function buttonText(node) {
 export function captureChrome(node,columns,rows,settings) {
   if(node.matches('.object-definition,.output-text'))return captureTranscript(node,columns,rows,settings);
   const source=node.matches('.syntax-layer,.xaml-highlight,.code-gutter,.xaml-gutter'),content=node.matches('.ide-dialog-body');
-  const grid=projectionGrid(node,columns,rows,settings),items=[],covered=new Set(),holes=[],textBudget={remaining:24000};
+  const grid=projectionGrid(node,columns,rows,settings),items=[],covered=new Set(),holes=[],search=[],textBudget={remaining:24000};
+  // Native Vim match rectangles already use the visible source projection.
+  // Recolor those cells without changing the selection or copying the source.
+  if(node.matches('.syntax-layer,.xaml-highlight'))for(const marker of node.parentElement?.querySelectorAll('.input-mode-search-overlay .input-mode-search-match')||[]){
+    if(!marker.getClientRects().length||marker.closest('[hidden]'))continue;
+    const rect=marker.getBoundingClientRect(),x=Math.round((rect.left-grid.x)/grid.pitchX),right=Math.round((rect.right-grid.x)/grid.pitchX),
+      y=Math.floor((rect.top+rect.height/2-grid.y)/grid.pitchY);
+    if(rect.width>0&&rect.height>0&&right>x)search.push({x,y,width:right-x,height:Math.max(1,Math.round(rect.height/grid.pitchY))});
+  }
   if(content)for(const island of node.querySelectorAll('.ide-theme-preview,.application-theme-preview,iframe,object,embed,[data-vb-native-render]')){
     if(island.getClientRects().length&&!island.closest('[hidden]'))holes.push(grid.project(island.getBoundingClientRect()));covered.add(island);
   }
@@ -133,7 +141,7 @@ export function captureChrome(node,columns,rows,settings) {
     const obstacle=items.filter(other=>other!==item&&other.kind!=='text'&&other.x>item.x&&other.y<item.y+item.height&&other.y+other.height>item.y).sort((a,b)=>a.x-b.x)[0];
     if(obstacle)item.width=Math.min(item.width,obstacle.x-item.x);
   }
-  return {source,content,holes,title:title(node),inactive:!!node.closest('.mdi-window:not(.mdi-active),.vb-inactive'),menu:node.matches('.classic-menu'),
+  return {source,content,holes,search,title:title(node),inactive:!!node.closest('.mdi-window:not(.mdi-active),.vb-inactive'),menu:node.matches('.classic-menu'),
     functionBar:node.matches('.dos-function-bar'),toolbar:node.matches('.toolbar,.panel-toolbar'),property:node.matches('.property-row'),
     frameTitle:node.matches('.tool-caption,.document-title,.ide-dialog-title'),selected:selectedNode,items};
 }
@@ -196,6 +204,16 @@ export function paintChrome(buffer,state,profile='turbo') {
       if(item.submenu)buffer.put(x+width-1,cy,'►',ink,paper);
     }finally{buffer.popClip();}
   }
+  const match=tuiAttribute(profile,'search');
+  for(const range of state.search||[]){
+    if(![range.x,range.y,range.width,range.height].every(Number.isSafeInteger))continue;
+    const right=Math.min(buffer.columns,range.x+range.width),bottom=Math.min(buffer.rows,range.y+range.height);
+    for(let y=Math.max(0,range.y);y<bottom;y++)for(let x=Math.max(0,range.x);x<right;x++){
+      const i=y*buffer.columns+x;
+      // Visual selections remain distinct from passive search highlights.
+      if(buffer.colors[i]>>4!==selection.background)buffer.put(x,y,buffer.glyphs[i],match.foreground,match.background,buffer.styles[i]);
+    }
+  }
   return buffer;
 }
 /** Character-painted nonclient regions keep their original menus, keyboard
@@ -219,7 +237,7 @@ export class TuiChromeRenderer {
       this.entries.set(node,entry);this.owner.observeSize(node);this.dirty.add(node);
     }
   }
-  invalidate(element){for(const node of this.entries.keys())if(!element||node.contains(element)||element.contains?.(node))this.dirty.add(node);}
+  invalidate(element){const search=element?.closest?.('.input-mode-search-overlay');if(search)element=search.parentElement||element;for(const node of this.entries.keys())if(!element||node.contains(element)||element.contains?.(node))this.dirty.add(node);}
   configure(){for(const entry of this.entries.values()){this.owner.surfacePixels-=entry.pixels;entry.pixels=0;entry.painter?.dispose();entry.painter=null;entry.buffer=entry.next=null;}this.invalidate();}
   flush(){
     const owner=this.owner;

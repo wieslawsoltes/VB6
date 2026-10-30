@@ -41,7 +41,7 @@ def scenario(failure=None, cleanup_failure=False, through_case=True):
             calls.append(['new-page', options]); self.page = Page(); return self.page
     with tempfile.TemporaryDirectory() as directory:
         namespace = {'HTML': '<!doctype html><title>the same inline bytes</title>', 'REPORT': Path(directory),
-                     'time': time, 'traceback': traceback, 'results': []}
+                     'time': time, 'traceback': traceback, 'results': [], 'IDE_STARTUP_TIMEOUT_MS': 60000}
         exec(code, namespace)
         browser = Browser()
         outcome = {}
@@ -80,7 +80,7 @@ test('pending load does not block the connected recovery API or extend interacti
     assert.deepEqual(calls(scenario, 'action-timeout'), [['action-timeout', 4500]]);
     assert.deepEqual(calls(scenario, 'content'), [['content', '<!doctype html><title>the same inline bytes</title>',
         {wait_until: 'domcontentloaded', timeout: 60000}]]);
-    assert.deepEqual(calls(scenario, 'ready')[0][2], {timeout: 60000});
+    assert.deepEqual(calls(scenario, 'ready')[0][2], {polling: 100, timeout: 60000});
     const predicate = calls(scenario, 'ready')[0][1];
     for (const state of [{}, {vb6Studio: {ideTools: {}}}, {vb6Studio: {root: {isConnected: false}, ideTools: {}}},
         {vb6Studio: {root: {isConnected: true}}}]) assert.equal(Boolean(vm.runInNewContext(predicate, state)), false);

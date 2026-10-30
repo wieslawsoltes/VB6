@@ -113,7 +113,7 @@ test('Advanced offline startup keeps real readiness, action deadlines and failur
   }
   assert.deepEqual(offline.calls.map(c=>c[0]),['goto','ready','fixture']);
   assert.match(offline.calls[0][1],/^file:.*\/dist\/VB6-Studio-Web-Advanced\.html$/);
-  assert.deepEqual(offline.calls[0][2],{wait_until:'commit'});
+  assert.deepEqual(offline.calls[0][2],{wait_until:'commit',timeout:60000});
   const ready=offline.calls[1];assert.deepEqual(ready[2],{polling:100,timeout:60000});
   for(const state of [{},{vb6Studio:{advancedEditor:{}},VB6StudioAPI:{}},
     {vb6Studio:{root:{isConnected:false},advancedEditor:{}},VB6StudioAPI:{}},
@@ -123,12 +123,12 @@ test('Advanced offline startup keeps real readiness, action deadlines and failur
   }
   assert.equal(Boolean(runInNewContext(ready[1],{vb6Studio:{root:{isConnected:true},advancedEditor:{}},VB6StudioAPI:{}})),true);
   const http=cases.find(c=>c.transport==='http'),memory=cases.find(c=>c.transport==='memory');
-  assert.deepEqual(http.calls[0],['goto','http://127.0.0.1:4123/dist/index.html',{}]);
+  assert.deepEqual(http.calls[0],['goto','http://127.0.0.1:4123/dist/index.html',{wait_until:'commit',timeout:60000}]);
   assert.deepEqual(http.requests,['http://127.0.0.1:4123/dist/index.html']);
-  assert.deepEqual(memory.calls[0],['content','<main>offline advanced fixture</main>',{}]);
+  assert.deepEqual(memory.calls[0],['content','<main>offline advanced fixture</main>',{wait_until:'domcontentloaded',timeout:60000}]);
   assert.deepEqual(memory.requests,[]);
   for(const item of [http,memory]){
-    assert.equal(item.successful,true);assert.equal(item.calls[1][2].timeout,15000);
+    assert.equal(item.successful,true);assert.equal(item.calls[1][2].timeout,60000);
   }
   for(const scenario of ['never-ready','navigation-error','close-error','new-page-error','fixture-error']){
     const item=find(scenario);

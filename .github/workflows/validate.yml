@@ -196,6 +196,7 @@ jobs:
           - core-runtime
           - core-parity
           - core-recovery
+          - core-boundaries
     steps:
       - uses: actions/checkout@v4
         with:
@@ -219,7 +220,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   browser:
-    name: Browser (${{ matrix.suite }}, ${{ matrix.browser }}${{ matrix.shard && format(', shard {0}/3', matrix.shard) || '' }})
+    name: Browser (${{ matrix.suite }}, ${{ matrix.browser }})
     runs-on: ubuntu-latest
     # Full mixed-origin project authoring and appearance suites stay exhaustive.
     timeout-minutes: 25
@@ -234,33 +235,10 @@ jobs:
           - integration-controls
           - integration-authoring
           - integration-appearance
+          - application-appearance
           - tui-authoring
           - intelligent-ui
           - project-authoring
-        exclude:
-          - suite: project-authoring
-            browser: webkit
-          - suite: integration-appearance
-            browser: webkit
-        include:
-          - suite: project-authoring
-            browser: webkit
-            shard: '1'
-          - suite: project-authoring
-            browser: webkit
-            shard: '2'
-          - suite: project-authoring
-            browser: webkit
-            shard: '3'
-          - suite: integration-appearance
-            browser: webkit
-            shard: '1'
-          - suite: integration-appearance
-            browser: webkit
-            shard: '2'
-          - suite: integration-appearance
-            browser: webkit
-            shard: '3'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -274,7 +252,6 @@ jobs:
         run: python tools/ci/run.py "$SUITE"
         env:
           SUITE: ${{ matrix.suite }}
-          VB6_BROWSER_SHARD: ${{ matrix.shard }}
       - name: Pascal forms, editing, MCP and debugging in offline classic editor
         run: python tools/browser-pascal-tests.py --origin file
         if: "!cancelled() && matrix.suite == 'integration-authoring'"
@@ -283,20 +260,21 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: browser-${{ matrix.suite }}-${{ matrix.browser }}${{ matrix.shard && format('-shard-{0}', matrix.shard) || '' }}
+          name: browser-${{ matrix.suite }}-${{ matrix.browser }}
           path: reports
           if-no-files-found: error
           retention-days: 7
   figma:
-    name: Figma (${{ matrix.suite }}, ${{ matrix.browser }}, ${{ matrix.transport }}${{ matrix.shard && format(', shard {0}/3', matrix.shard) || '' }})
+    name: Figma (${{ matrix.suite }}, ${{ matrix.browser }}, ${{ matrix.transport }})
     runs-on: ubuntu-latest
-    # The 43-case WebKit/file authoring partition takes about 25 minutes.
+    # Keep the validated main-branch bound while running disjoint script owners.
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         # Each suite owns disjoint scripts; origins and engines stay exhaustive.
         suite:
+          - figma-workspace
           - figma-authoring
           - figma-services
         browser:
@@ -306,38 +284,6 @@ jobs:
         transport:
           - http
           - file
-        exclude:
-          - suite: figma-authoring
-            browser: webkit
-            transport: file
-          - suite: figma-services
-            browser: webkit
-            transport: file
-        include:
-          - suite: figma-authoring
-            browser: webkit
-            transport: file
-            shard: '1'
-          - suite: figma-authoring
-            browser: webkit
-            transport: file
-            shard: '2'
-          - suite: figma-authoring
-            browser: webkit
-            transport: file
-            shard: '3'
-          - suite: figma-services
-            browser: webkit
-            transport: file
-            shard: '1'
-          - suite: figma-services
-            browser: webkit
-            transport: file
-            shard: '2'
-          - suite: figma-services
-            browser: webkit
-            transport: file
-            shard: '3'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -347,18 +293,17 @@ jobs:
           browser: ${{ matrix.browser }}
           profile: authoring
           mesa: ${{ matrix.browser == 'firefox' && matrix.suite == 'figma-authoring' }}
-      - name: Run the assigned authoring or services partition
+      - name: Run the assigned Figma partition
         run: python tools/ci/run.py "$SUITE"
         env:
           SUITE: ${{ matrix.suite }}
           VB6_TEST_TRANSPORT: ${{ matrix.transport }}
-          VB6_BROWSER_SHARD: ${{ matrix.shard }}
       - name: Verify generated outputs remain reproducible
         run: git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ${{ matrix.suite }}-${{ matrix.browser }}-${{ matrix.transport }}${{ matrix.shard && format('-shard-{0}', matrix.shard) || '' }}
+          name: ${{ matrix.suite }}-${{ matrix.browser }}-${{ matrix.transport }}
           path: reports
           if-no-files-found: error
           retention-days: 7
@@ -425,7 +370,7 @@ jobs:
           npm run build
           npm ci --prefix packages/advanced-editor --ignore-scripts --no-audit --no-fund
           node tools/build-advanced-editor.mjs
-          node --test tests/advanced-editor*.test.mjs
+          node --test tests/advanced-editor*.test.mjs tests/input-modes-monaco-layout.test.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -436,26 +381,23 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   advanced-editor:
-    name: Advanced editor (${{ matrix.browser }}${{ matrix.shard && format(', shard {0}/3', matrix.shard) || '' }})
+    name: ${{ matrix.suite }} (${{ matrix.browser }}, ${{ matrix.transport }})
     runs-on: ubuntu-latest
-    # Every editor case runs through both real origins in the same job.
+    # Each disjoint editor partition keeps the validated main-branch job bound.
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
+        suite:
+          - advanced-editor-core
+          - advanced-editor-integration
         browser:
           - chromium
           - firefox
           - webkit
-        exclude:
-          - browser: webkit
-        include:
-          - browser: webkit
-            shard: '1'
-          - browser: webkit
-            shard: '2'
-          - browser: webkit
-            shard: '3'
+        transport:
+          - http
+          - file
     needs:
       - advanced-build
     steps:
@@ -471,25 +413,27 @@ jobs:
         with:
           name: advanced-editor-assets
           path: dist
-      - name: Actual Monaco and Figma integration on both origins
-        run: python tools/ci/run.py advanced-editor
+      - name: Run the owned advanced editor scripts on the selected origin
         env:
-          VB6_BROWSER_SHARD: ${{ matrix.shard }}
-      - name: Pascal forms, editing, MCP and debugging in Monaco over HTTP
-        run: python tools/browser-pascal-tests.py --advanced --origin http
-        if: "!cancelled() && (matrix.browser != 'webkit' || matrix.shard == '2')"
-      - name: Pascal forms, editing, MCP and debugging in offline Monaco
-        run: python tools/browser-pascal-tests.py --advanced --origin file
-        if: "!cancelled() && (matrix.browser != 'webkit' || matrix.shard == '3')"
+          SUITE: ${{ matrix.suite }}
+          VB6_TEST_TRANSPORT: ${{ matrix.transport }}
+          VB6_TEST_ADVANCED: '1'
+        run: python tools/ci/run.py "$SUITE"
+      - name: Pascal forms, editing, MCP and debugging in Monaco
+        run: python tools/browser-pascal-tests.py --advanced --origin "$TRANSPORT"
+        env:
+          TRANSPORT: ${{ matrix.transport }}
+        if: "!cancelled() && matrix.suite == 'advanced-editor-integration'"
       - name: Verify generated outputs remain reproducible
         run: git diff --exit-code -- dist src/exporter/runtime-payload.js src/editor/diagnostics-payload.js examples
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: advanced-editor-${{ matrix.browser }}${{ matrix.shard && format('-shard-{0}', matrix.shard) || '' }}
+          name: ${{ matrix.suite }}-${{ matrix.browser }}-${{ matrix.transport }}
           path: |-
             reports/advanced-editor
             reports/pascal
+            reports/input-modes
             reports/ci
           if-no-files-found: error
           retention-days: 7
@@ -822,7 +766,6 @@ jobs:
       matrix:
         os:
           - ubuntu-24.04
-          - macos-14
           - macos-15
           - macos-26
     runs-on: ${{ matrix.os }}
@@ -902,7 +845,6 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - macos-14
           - macos-15
           - macos-26
     runs-on: ${{ matrix.os }}

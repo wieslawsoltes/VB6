@@ -1,6 +1,6 @@
 """Regression tests for the suite's reference-independent screenshot capture.
 
-Extract only the nested helper so importing this test never starts browsers or
+Extract only the capture helper so importing this test never starts browsers or
 executes acceptance cases. The fake page records actual screenshot options.
 """
 import ast
@@ -177,6 +177,46 @@ class CaptureTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.capture(page, 'rerun', 'html')
         self.assertFalse((self.output / 'rerun-html.png').exists())
+
+
+    def test_primitive_clip_and_painter_identity_survive_timeout_recovery(self):
+        page = self.page([b'old', ScreenshotTimeout('stalled'), b'new'], backend='webgpu')
+        base = page.evaluate
+        checks = []
+        def evaluate(expression):
+            if expression == 'painter.name':
+                checks.append(expression); return 'webgpu'
+            self.assertNotIn('painter.render', expression)
+            return base(expression)
+        page.evaluate = evaluate
+        clip = {'x': 0, 'y': 0, 'width': 256, 'height': 128}
+        image = self.capture(page, 'primitive', 'webgpu', 'painter', backend_property='name', clip=clip)
+        self.assertEqual(image, b'new')
+        self.assertEqual(page.calls, [{'caret': 'initial', 'clip': clip}]*5)
+        self.assertEqual(len(checks), 9)
+        report = json.loads((self.output / 'primitive-reference.json').read_text())
+        self.assertTrue(report['accepted']); self.assertEqual(report['stableCaptures'], 3)
+        self.assertEqual(report['clip'], clip)
+        self.assertEqual(len(report['captureErrors']), 1)
+
+    def test_primitive_painter_change_during_capture_is_fatal(self):
+        page = self.page([b'frame']); checks = []
+        base = page.evaluate
+        def evaluate(expression):
+            if expression == 'painter.name':
+                checks.append(expression); return 'webgpu' if len(checks) == 1 else 'canvas2d'
+            return base(expression)
+        page.evaluate = evaluate
+        with self.assertRaisesRegex(AssertionError, 'unexpected renderer'):
+            self.capture(page, 'wrong-painter', 'webgpu', 'painter', backend_property='name')
+        self.assertEqual(len(page.calls), 1)
+        self.assertFalse((self.output / 'wrong-painter-webgpu.png').exists())
+
+    def test_only_known_backend_identity_properties_are_accepted(self):
+        page = self.page([b'frame'])
+        with self.assertRaises(ValueError):
+            self.capture(page, 'bad-identity', 'webgpu', 'painter', backend_property='device.destroy()')
+        self.assertEqual(page.calls, [])
 
 
 class TranslucentCaptureTests(unittest.TestCase):

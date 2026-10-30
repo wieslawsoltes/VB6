@@ -1,45 +1,76 @@
 #!/usr/bin/env python3
 import contextlib
-import importlib.util
 import io
 import json
-import os
 from pathlib import Path
 import sys
 import tempfile
 import threading
-import types
 import unittest
 from unittest.mock import patch
 import run
-from browser_partition import APPEARANCE_SCRIPT_SHARDS, own_case_names, project_test_names, select_case_names, validate_browser_shard
 
 class RunnerTests(unittest.TestCase):
     def task(self, code):
         return {'script':'fixture.py','transport':'http','argv':[sys.executable,'-u','-c',code]}
+    def test_local_browser_selector_cannot_narrow_ci_inventory(self):
+        with tempfile.TemporaryDirectory() as d,contextlib.redirect_stdout(io.StringIO()),patch.dict(run.os.environ,{'VB6_BROWSER_SHARD':'2'}):
+            root=Path(d)
+            task=self.task("import os;assert 'VB6_BROWSER_SHARD' not in os.environ")
+            result=run.run_batch([task],root,'webkit',root/'report')
+            self.assertTrue(result['passed'],result)
     def test_all_plans_are_finite_and_both_advanced_origins_are_owned(self):
-        for group in json.loads((run.ROOT/'tools/ci/suites.json').read_text()):
+        groups=json.loads((run.ROOT/'tools/ci/suites.json').read_text())
+        for group in [*groups,'advanced-editor']:
             for engine in run.ENGINES:
                 tasks=run.plan(group,engine,'http');self.assertTrue(0<len(tasks)<=16)
                 if group in ('advanced-editor','code-gpu'):
                     self.assertEqual({t['transport'] for t in tasks},{'http','file'})
-    def test_figma_partitions_are_disjoint_and_combined_alias_preserves_every_suite(self):
+    def test_advanced_partitions_are_disjoint_and_alias_preserves_both_origins(self):
+        expected=['browser-advanced-editor-tests.py','browser-input-modes-tests.py',
+                  'browser-tui-advanced-tests.py','figma-advanced-editor-browser-tests.py']
         for engine in run.ENGINES:
-            for origin in ('http', 'file'):
-                first=run.plan('figma-authoring',engine,origin)
-                second=run.plan('figma-services',engine,origin)
-                self.assertFalse({t['script'] for t in first}&{t['script'] for t in second})
-                self.assertEqual(first+second,run.plan('figma',engine,origin))
-                self.assertEqual(len(first),5)
-                self.assertEqual(len(second),3)
+            for origin in ('http','file','memory'):
+                parts=[run.plan(group,engine,origin) for group in
+                       ('advanced-editor-core','advanced-editor-integration')]
+                combined=[task for part in parts for task in part]
+                self.assertEqual([len(part) for part in parts],[1,3])
+                self.assertEqual([task['script'] for task in combined],expected)
+                self.assertEqual(len({task['script'] for task in combined}),4)
+                self.assertEqual({task['transport'] for task in combined},{origin})
+                for task in combined:
+                    self.assertEqual(task['argv'],[sys.executable,str(run.ROOT/'tools'/task['script'])])
+            both=[task for origin in ('http','file') for group in
+                  ('advanced-editor-core','advanced-editor-integration')
+                  for task in run.plan(group,engine,origin)]
+            for requested_origin in ('http','file','memory'):
+                self.assertEqual(run.plan('advanced-editor',engine,requested_origin),both)
+    def test_figma_partitions_are_disjoint_and_combined_alias_preserves_every_suite(self):
+        expected=['figma-browser-tests.py','figma-presentation-browser-tests.py',
+                  'figma-retained-webgl-browser-tests.py','figma-navigation-browser-tests.py',
+                  'figma-editor-browser-tests.py','figma-property-keyboard-browser-tests.py',
+                  'figma-services-browser-tests.py','figma-service-state-browser-tests.py']
+        for engine in run.ENGINES:
+            for origin in ('http', 'file', 'memory'):
+                parts=[run.plan(group,engine,origin) for group in
+                       ('figma-workspace','figma-authoring','figma-services')]
+                combined=[task for part in parts for task in part]
+                self.assertEqual([len(part) for part in parts],[1,4,3])
+                self.assertEqual([task['script'] for task in combined],expected)
+                self.assertEqual(len({task['script'] for task in combined}),8)
+                self.assertEqual({task['transport'] for task in combined},{origin})
+                self.assertEqual(combined,run.plan('figma',engine,origin))
     def test_process_deadlines_are_scoped_to_measured_standalone_suites(self):
         expected={
+            ('webkit','http','browser-application-theme-tests.py'):900,
+            ('webkit','file','browser-application-theme-tests.py'):900,
             ('webkit','file','figma-browser-tests.py'):900,
             ('webkit','file','figma-editor-browser-tests.py'):900,
             ('webkit','file','figma-services-browser-tests.py'):900,
             ('webkit','http','native-project-browser-tests.py'):1200,
             ('webkit','file','native-project-browser-tests.py'):1200,
             ('webkit','file','browser-advanced-editor-tests.py'):1200,
+            ('webkit','file','browser-input-modes-tests.py'):900,
         }
         scripts=sorted({script for group in json.loads((run.ROOT/'tools/ci/suites.json').read_text()).values() for script in group})
         with tempfile.TemporaryDirectory() as d,contextlib.redirect_stdout(io.StringIO()):
@@ -56,12 +87,14 @@ class RunnerTests(unittest.TestCase):
                     self.assertTrue(result['passed'])
                     self.assertEqual(observed,deadlines,(engine,origin))
                     self.assertEqual([r['timeoutSeconds'] for r in result['cases']],deadlines)
+
     def test_explicit_short_deadline_is_preserved_for_standalone_suites(self):
         tasks=[{**self.task(''), 'script':script, 'transport':origin} for origin,script in [
             ('file','figma-browser-tests.py'),('file','figma-editor-browser-tests.py'),
             ('file','figma-services-browser-tests.py'),
             ('http','native-project-browser-tests.py'),('file','native-project-browser-tests.py'),
-            ('file','browser-advanced-editor-tests.py')]]
+            ('file','browser-advanced-editor-tests.py'),
+            ('http','browser-application-theme-tests.py'),('file','browser-application-theme-tests.py')]]
         with tempfile.TemporaryDirectory() as d,contextlib.redirect_stdout(io.StringIO()):
             root=Path(d);observed=[]
             def execute(task,root,env,log,timeout,cancelled):
@@ -69,138 +102,10 @@ class RunnerTests(unittest.TestCase):
                 return {'status':'passed','exitCode':0,'seconds':0}
             result=run.run_batch(tasks,root,'webkit',root/'report',timeout=2,execute_fn=execute)
             self.assertTrue(result['passed']);self.assertEqual(observed,[2]*len(tasks))
+
     def test_invalid_arguments_fail_closed(self):
         for args in [('unknown','chromium','http'),('../figma','chromium','http'),('figma','chrome','http'),('figma','webkit','https://remote')]:
             with self.assertRaises(ValueError):run.plan(*args)
-    def test_only_approved_webkit_cells_accept_browser_shards(self):
-        approved = [('project-authoring', 'webkit', 'http'), ('figma-authoring', 'webkit', 'file'),
-                    ('figma-services', 'webkit', 'file'), ('advanced-editor', 'webkit', 'http'),
-                    ('advanced-editor', 'webkit', 'file'), ('integration-appearance', 'webkit', 'http')]
-        for cell in approved:
-            for shard in ('1', '2', '3'):
-                self.assertEqual(validate_browser_shard(shard, *cell), shard)
-        for shard in ('0', '4', '01', '1/3', '-1', ' 1', '1.0', 1, True):
-            with self.assertRaises(ValueError):run.plan('project-authoring', 'webkit', 'http', browser_shard=shard)
-        for cell in [('project-authoring', 'chromium', 'http'), ('project-authoring', 'webkit', 'file'),
-                     ('project-authoring', 'webkit', 'memory'), ('figma-authoring', 'webkit', 'http'),
-                     ('figma-services', 'firefox', 'file'), ('advanced-editor', 'chromium', 'http'),
-                     ('integration-appearance', 'chromium', 'http'), ('integration-appearance', 'firefox', 'http'),
-                     ('integration-appearance', 'webkit', 'file'), ('integration-appearance', 'webkit', 'memory'),
-                     ('integration-authoring', 'webkit', 'http'), ('figma', 'webkit', 'file')]:
-            with self.assertRaises(ValueError):run.plan(*cell, browser_shard='1')
-    def test_appearance_whole_script_shards_preserve_each_entrypoint_once(self):
-        inventory = json.loads((run.ROOT / 'tools/ci/suites.json').read_text())['integration-appearance']
-        whole = run.plan('integration-appearance', 'webkit', 'http')
-        parts = [run.plan('integration-appearance', 'webkit', 'http', browser_shard=shard) for shard in ('1', '2', '3')]
-        self.assertEqual([[task['script'] for task in part] for part in parts],
-                         [['browser-theme-tests.py', 'browser-native-caption-tests.py'],
-                          ['browser-application-theme-tests.py', 'browser-winui3-tests.py'],
-                          ['browser-macos-reference-tests.py', 'browser-winui-tests.py']])
-        flattened = [task for part in parts for task in part]
-        self.assertEqual(sorted(task['script'] for task in flattened), sorted(inventory))
-        self.assertEqual(len({task['script'] for task in flattened}), len(inventory))
-        self.assertEqual(sorted(flattened, key=lambda task: task['script']),
-                         sorted(whole, key=lambda task: task['script']))
-        self.assertTrue(all('browserShard' not in task and 'ownedCases' not in task for task in flattened))
-        for engine in run.ENGINES:
-            self.assertEqual([task['script'] for task in run.plan('integration-appearance', engine, 'http')], inventory)
-    def test_appearance_ownership_rejects_lost_extra_duplicate_and_empty_scripts(self):
-        inventory = json.loads((run.ROOT / 'tools/ci/suites.json').read_text())['integration-appearance']
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory); (root / 'tools/ci').mkdir(parents=True)
-            for name in [*inventory, 'additional.py']:
-                (root / 'tools' / name).write_text('')
-            for names in [inventory[:-1], [*inventory, 'additional.py'], [*inventory, inventory[0]], []]:
-                (root / 'tools/ci/suites.json').write_text(json.dumps({'integration-appearance': names}))
-                for shard in ('1', '2', '3'):
-                    with self.subTest(inventory=names, shard=shard), self.assertRaises(ValueError):
-                        run.plan('integration-appearance', 'webkit', 'http', root, browser_shard=shard)
-        mapping = dict(APPEARANCE_SCRIPT_SHARDS)
-        mutations = [{key: value for key, value in mapping.items() if key != '3'},
-                     {**mapping, '4': ('additional.py',)}, {**mapping, '2': ()},
-                     {**mapping, '3': mapping['3'][:-1]},
-                     {**mapping, '3': (*mapping['3'], mapping['1'][0])},
-                     {**mapping, '3': (mapping['3'][0], 'test_rendering_pixels.py')}]
-        for ownership in mutations:
-            with patch.dict(APPEARANCE_SCRIPT_SHARDS, ownership, clear=True):
-                for shard in ('1', '2', '3'):
-                    with self.subTest(ownership=ownership, shard=shard), self.assertRaises(ValueError):
-                        run.plan('integration-appearance', 'webkit', 'http', browser_shard=shard)
-    def test_appearance_whole_scripts_clear_case_shards_and_retain_process_deadline(self):
-        observed = []
-        def inspect(task, root, env, log, timeout, cancelled):
-            observed.append((task['script'], env['VB6_BROWSER'], env['VB6_TEST_TRANSPORT'], env['VB6_BROWSER_SHARD'], timeout))
-            return {'status': 'passed', 'exitCode': 0, 'error': None, 'seconds': 0}
-        with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()), \
-             patch.dict(os.environ, {'VB6_BROWSER_SHARD': '2'}):
-            for shard in ('1', '2', '3'):
-                tasks = run.plan('integration-appearance', 'webkit', 'http', browser_shard=shard)
-                result = run.run_batch(tasks, Path(directory), 'webkit', Path(directory) / shard, execute_fn=inspect)
-                self.assertTrue(result['passed'])
-        inventory = json.loads((run.ROOT / 'tools/ci/suites.json').read_text())['integration-appearance']
-        self.assertEqual(sorted(observed), sorted((name, 'webkit', 'http', '', 480) for name in inventory))
-    def test_native_project_shards_preserve_every_case_on_both_origins_once(self):
-        cases = own_case_names(run.ROOT / 'tools/native-project-browser-tests.py', 'case_')
-        complete = project_test_names(cases)
-        parts = [project_test_names(cases, shard=shard) for shard in ('1', '2', '3')]
-        self.assertEqual(len(cases), 30)
-        self.assertEqual([len(part) for part in parts], [20, 20, 20])
-        self.assertEqual(sorted(name for part in parts for name in part), complete)
-        self.assertEqual(len(set(name for part in parts for name in part)), len(complete))
-        for part in parts:
-            self.assertEqual({name[:-5] for name in part if name.endswith('_http')},
-                             {name[:-5] for name in part if name.endswith('_file')})
-        self.assertEqual(len(project_test_names(cases, 'memory')), 30)
-        self.assertTrue(all(name.endswith('_memory') for name in project_test_names(cases, 'memory')))
-        for names in ([], ['case_a', 'case_a'], ['invalid']):
-            with self.assertRaises(ValueError):project_test_names(names)
-        for origin in ('file', 'memory'):
-            with self.assertRaises(ValueError):project_test_names(cases, origin, '1')
-        with self.assertRaises(ValueError):select_case_names(['test_only'], '2')
-        self.assertEqual(select_case_names(['test_only'], '2', allow_empty=True), [])
-    def test_native_project_workspace_review_has_exactly_one_shard_owner(self):
-        parts = [run.plan('project-authoring', 'webkit', 'http', browser_shard=shard) for shard in ('1', '2', '3')]
-        self.assertEqual([[task['script'] for task in part] for part in parts],
-                         [['native-project-browser-tests.py', 'project-workspace-review-browser-tests.py'],
-                          ['native-project-browser-tests.py'], ['native-project-browser-tests.py']])
-        self.assertNotIn('browserShard', parts[0][1])
-        for shard, part in zip(('1', '2', '3'), parts):
-            self.assertEqual(part[0]['browserShard'], shard)
-            self.assertEqual(len(part[0]['ownedCases']), 10)
-        for engine in ('chromium', 'firefox'):
-            tasks = run.plan('project-authoring', engine, 'http')
-            self.assertEqual(len(tasks), 2)
-            self.assertTrue(all('browserShard' not in task for task in tasks))
-    def test_figma_and_advanced_plans_have_exact_disjoint_case_ownership(self):
-        for group, origin in [('figma-authoring', 'file'), ('figma-services', 'file'), ('advanced-editor', 'http')]:
-            whole = run.plan(group, 'webkit', origin)
-            expected = sorted((task['script'], task['transport'], name)
-                              for task in whole for name in own_case_names(run.ROOT / 'tools' / task['script']))
-            parts = [run.plan(group, 'webkit', origin, browser_shard=shard) for shard in ('1', '2', '3')]
-            actual = [(task['script'], task['transport'], name)
-                      for part in parts for task in part for name in task['ownedCases']]
-            self.assertEqual(sorted(actual), expected)
-            self.assertEqual(len(actual), len(set(actual)))
-            self.assertTrue(all(task['ownedCases'] for part in parts for task in part))
-            self.assertEqual([sum(len(task['ownedCases']) for task in part) for part in parts],
-                             {'figma-authoring': [16, 14, 13], 'figma-services': [11, 11, 10],
-                              'advanced-editor': [28, 22, 22]}[group])
-        retained = 'figma-retained-webgl-browser-tests.py'
-        self.assertIn(retained, [task['script'] for task in run.plan('figma-authoring', 'webkit', 'file', browser_shard='1')])
-        for shard in ('2', '3'):
-            self.assertNotIn(retained, [task['script'] for task in run.plan('figma-authoring', 'webkit', 'file', browser_shard=shard)])
-            self.assertNotIn('figma-advanced-editor-browser-tests.py',
-                             [task['script'] for task in run.plan('advanced-editor', 'webkit', 'http', browser_shard=shard)])
-    def test_child_shard_environment_is_owned_by_the_validated_plan(self):
-        observed = []
-        def inspect(task, root, env, log, timeout, cancelled):
-            observed.append((task['script'], env['VB6_BROWSER_SHARD']))
-            return {'status': 'passed', 'exitCode': 0, 'error': None, 'seconds': 0}
-        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()), patch.dict(os.environ, {'VB6_BROWSER_SHARD': 'invalid inherited value'}):
-            tasks = run.plan('project-authoring', 'webkit', 'http', browser_shard='1')
-            result = run.run_batch(tasks, Path(d), 'webkit', Path(d) / 'report', execute_fn=inspect)
-            self.assertTrue(result['passed'])
-        self.assertEqual(observed, [('native-project-browser-tests.py', '1'), ('project-workspace-review-browser-tests.py', '')])
     def test_firefox_only_wraps_the_explicit_webgl_case(self):
         for engine in run.ENGINES:
             for t in run.plan('figma',engine,'file'):
@@ -239,6 +144,73 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(result['cases'][0]['exitCode'],7)
             self.assertIn('primary failure',(root/'report'/result['cases'][0]['log']).read_text())
             self.assertEqual(json.loads((root/'report/timings.json').read_text()),result)
+    def test_native_project_deadline_is_scoped_and_explicit_limits_win(self):
+        with tempfile.TemporaryDirectory() as d,contextlib.redirect_stdout(io.StringIO()):
+            root=Path(d)
+            scripts=['native-project-browser-tests.py','project-workspace-review-browser-tests.py','fixture.py']
+            tasks=[{**self.task(''), 'script':script} for script in scripts]
+            deadlines=[]
+            def record_deadline(task,root,env,log,timeout,cancelled):
+                deadlines.append((env['VB6_BROWSER'],task['script'],timeout))
+                return {'status':'passed','exitCode':0,'seconds':0}
+            for engine in run.ENGINES:
+                result=run.run_batch(tasks,root,engine,root/engine,execute_fn=record_deadline)
+                expected=[1200 if engine=='webkit' else 480,480,480]
+                self.assertTrue(result['passed'])
+                self.assertEqual([item['script'] for item in result['cases']],scripts)
+                self.assertEqual([item['timeoutSeconds'] for item in result['cases']],expected)
+                self.assertEqual(deadlines[-3:],[(engine,script,limit) for script,limit in zip(scripts,expected)])
+            for limit in (2,480):
+                result=run.run_batch(tasks,root,'webkit',root/str(limit),timeout=limit,execute_fn=record_deadline)
+                self.assertEqual([item['timeoutSeconds'] for item in result['cases']],[limit]*3)
+                self.assertEqual(deadlines[-3:],[('webkit',script,limit) for script in scripts])
+    def test_figma_workspace_deadline_is_scoped_to_webkit_file_and_explicit_limits_win(self):
+        with tempfile.TemporaryDirectory() as d,contextlib.redirect_stdout(io.StringIO()):
+            root=Path(d)
+            scripts=['native-project-browser-tests.py','figma-browser-tests.py',
+                     'figma-editor-browser-tests.py','fixture.py']
+            deadlines=[]
+            def record_deadline(task,root,env,log,timeout,cancelled):
+                deadlines.append((env['VB6_BROWSER'],env['VB6_TEST_TRANSPORT'],task['script'],timeout))
+                return {'status':'passed','exitCode':0,'seconds':0}
+            for engine in run.ENGINES:
+                for origin in ('http','file','memory'):
+                    tasks=[{**self.task(''),'script':script,'transport':origin} for script in scripts]
+                    result=run.run_batch(tasks,root,engine,root/engine/origin,execute_fn=record_deadline)
+                    expected=[1200 if engine=='webkit' and origin!='memory' else 480,
+                              900 if engine=='webkit' and origin=='file' else 480,
+                              900 if engine=='webkit' and origin=='file' else 480,480]
+                    self.assertTrue(result['passed'])
+                    self.assertEqual([item['timeoutSeconds'] for item in result['cases']],expected)
+                    self.assertEqual(deadlines[-4:],[(engine,origin,script,limit) for script,limit in zip(scripts,expected)])
+            for limit in (2,480):
+                tasks=[{**self.task(''),'script':script,'transport':'file'} for script in scripts]
+                result=run.run_batch(tasks,root,'webkit',root/str(limit),timeout=limit,execute_fn=record_deadline)
+                self.assertEqual([item['timeoutSeconds'] for item in result['cases']],[limit]*4)
+                self.assertEqual(deadlines[-4:],[('webkit','file',script,limit) for script in scripts])
+    def test_advanced_deadlines_only_extend_webkit_file_monaco_and_vim(self):
+        with tempfile.TemporaryDirectory() as d,contextlib.redirect_stdout(io.StringIO()):
+            root=Path(d)
+            scripts=['browser-advanced-editor-tests.py','browser-input-modes-tests.py',
+                     'browser-tui-advanced-tests.py','figma-advanced-editor-browser-tests.py']
+            deadlines=[]
+            def record_deadline(task,root,env,log,timeout,cancelled):
+                deadlines.append((env['VB6_BROWSER'],env['VB6_TEST_TRANSPORT'],task['script'],timeout))
+                return {'status':'passed','exitCode':0,'seconds':0}
+            for engine in run.ENGINES:
+                for origin in ('http','file','memory'):
+                    tasks=[{**self.task(''),'script':script,'transport':origin} for script in scripts]
+                    result=run.run_batch(tasks,root,engine,root/engine/origin,execute_fn=record_deadline)
+                    limit=900 if engine=='webkit' and origin=='file' else 480
+                    expected=[1200 if engine=='webkit' and origin=='file' else 480,limit,480,480]
+                    self.assertTrue(result['passed'])
+                    self.assertEqual([item['timeoutSeconds'] for item in result['cases']],expected)
+                    self.assertEqual(deadlines[-4:],[(engine,origin,script,bound) for script,bound in zip(scripts,expected)])
+            for limit in (2,480):
+                tasks=[{**self.task(''),'script':script,'transport':'file'} for script in scripts]
+                result=run.run_batch(tasks,root,'webkit',root/str(limit),timeout=limit,execute_fn=record_deadline)
+                self.assertEqual([item['timeoutSeconds'] for item in result['cases']],[limit]*4)
+                self.assertEqual(deadlines[-4:],[('webkit','file',script,limit) for script in scripts])
     def test_timeout_and_cancellation_never_pass(self):
         with tempfile.TemporaryDirectory() as d,contextlib.redirect_stdout(io.StringIO()):
             root=Path(d)
@@ -259,108 +231,4 @@ class RunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d,contextlib.redirect_stdout(io.StringIO()):
             root=Path(d);self.assertTrue(run.run_batch([self.task('print("ok")')],root,'chromium',root/'r')['passed'])
             with self.assertRaises(ValueError):run.run_batch([],root,'chromium',root/'empty')
-
-
-class NativeProjectFixtureTests(unittest.TestCase):
-    @contextlib.contextmanager
-    def fixture(self, **environment):
-        playwright = types.ModuleType('playwright')
-        sync_api = types.ModuleType('playwright.sync_api')
-        def unexpected_browser():
-            raise AssertionError('Inventory and fixture fault injection must not launch a browser')
-        sync_api.sync_playwright = unexpected_browser
-        with patch.dict(sys.modules, {'playwright': playwright, 'playwright.sync_api': sync_api}), \
-             patch.object(sys, 'path', [str(run.ROOT / 'tools'), *sys.path]), \
-             patch.dict(os.environ, {'VB6_BROWSER': 'webkit', 'VB6_TEST_TRANSPORT': 'http',
-                                     'VB6_BROWSER_SHARD': '', **environment}):
-            spec = importlib.util.spec_from_file_location('native_project_partition_regression', run.ROOT / 'tools/native-project-browser-tests.py')
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            yield module
-
-    def test_real_loader_partitions_the_full_inventory_and_preserves_unsharded_origins(self):
-        with self.fixture() as module:
-            complete = [test._testMethodName for test in module.load_tests(unittest.TestLoader(), None, None)]
-            self.assertEqual(len(complete), 60)
-            selected = []
-            for shard in ('1', '2', '3'):
-                with patch.dict(os.environ, {'VB6_BROWSER_SHARD': shard}):
-                    names = [test._testMethodName for test in module.load_tests(unittest.TestLoader(), None, None)]
-                self.assertEqual(len(names), 20)
-                selected.extend(names)
-            self.assertEqual(sorted(selected), complete)
-            self.assertEqual(len(selected), len(set(selected)))
-            for engine in ('chromium', 'firefox'):
-                with patch.dict(os.environ, {'VB6_BROWSER': engine}):
-                    self.assertEqual([test._testMethodName for test in module.load_tests(unittest.TestLoader(), None, None)], complete)
-            for env in ({'VB6_BROWSER_SHARD': '4'}, {'VB6_BROWSER_SHARD': '1', 'VB6_BROWSER': 'chromium'},
-                        {'VB6_BROWSER_SHARD': '1', 'VB6_TEST_TRANSPORT': 'memory'}):
-                with patch.dict(os.environ, env), self.assertRaises(ValueError):
-                    module.load_tests(unittest.TestLoader(), None, None)
-        with self.fixture(VB6_TEST_TRANSPORT='memory') as module:
-            names = [test._testMethodName for test in module.load_tests(unittest.TestLoader(), None, None)]
-            self.assertEqual(len(names), 30)
-            self.assertTrue(all(name.endswith('_memory') for name in names))
-
-    def test_real_fixture_retains_phase_timings_and_cleanup_after_startup_failure(self):
-        for failure, close_failure in [(None, False), ('navigation', False), ('readiness', False),
-                                       ('navigation', True), ('readiness', True), (None, True)]:
-            with self.subTest(failure=failure, close_failure=close_failure), self.fixture(VB6_BROWSER_SHARD='1') as module, \
-                 tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()):
-                calls = []
-                original = RuntimeError('original ' + str(failure))
-                class Page:
-                    def on(self, event, listener):
-                        calls.append(('page-event', event))
-                    def goto(self, address, **options):
-                        calls.append(('goto', address, options))
-                        if failure == 'navigation':
-                            raise original
-                    def wait_for_function(self, expression, **options):
-                        calls.append(('readiness', expression, options))
-                        if failure == 'readiness':
-                            raise original
-                class Context:
-                    def set_default_timeout(self, timeout):
-                        calls.append(('action-timeout', timeout))
-                    def new_page(self):
-                        return Page()
-                    def close(self):
-                        calls.append(('close',))
-                        if close_failure:
-                            raise RuntimeError('cleanup failure')
-                class Browser:
-                    def new_context(self, **options):
-                        calls.append(('context', options))
-                        return Context()
-                class Probe(module.NativeProjects):
-                    engine = 'webkit'
-                    browser = Browser()
-                    def test_probe_file(self):
-                        calls.append(('body',))
-                module.REPORT = Path(directory)
-                result = unittest.TestResult()
-                Probe('test_probe_file').run(result)
-                self.assertEqual(len(result.errors), bool(failure) + close_failure)
-                self.assertEqual(sum(call[0] == 'close' for call in calls), 1)
-                self.assertIn(('action-timeout', 6000), calls)
-                navigation = next(call for call in calls if call[0] == 'goto')
-                self.assertTrue(navigation[1].startswith('file:'))
-                self.assertEqual(navigation[2], {'wait_until': 'commit'})
-                if failure != 'navigation':
-                    readiness = next(call for call in calls if call[0] == 'readiness')
-                    self.assertEqual(readiness[2], {'polling': 100, 'timeout': 60000})
-                records = list(Path(directory).rglob('*.timings.json'))
-                self.assertEqual(len(records), 1)
-                record = json.loads(records[0].read_text())
-                self.assertEqual((record['browser'], record['origin'], record['shard']), ('webkit', 'file', '1'))
-                self.assertEqual(record['phases']['cleanup']['completed'], not close_failure)
-                if failure:
-                    self.assertFalse(record['phases'][failure]['completed'])
-                    self.assertTrue(any('original ' + failure in error for _case, error in result.errors))
-                    self.assertNotIn(('body',), calls)
-                else:
-                    self.assertIn(('body',), calls)
-
-
 if __name__=='__main__':unittest.main(verbosity=2)

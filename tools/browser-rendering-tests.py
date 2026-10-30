@@ -72,6 +72,65 @@ def new_page(browser, dpr=1, ide=False):
 
 from rendering_pixels import compare_pixels as pixels
 
+def stable_render_capture(page, name, backend, renderer="vb6Studio.rendering", *, backend_property="backend", clip=None):
+    # Stabilize each backend independently, without looking at the expected
+    # pixels. The HTML baseline remains fixed throughout comparison. Font-ready
+    # and two rAF callbacks alone do not await asynchronous native raster /
+    # initial MDI layout. Require three identical captures before
+    # comparing; never retry a mismatch against the baseline until it passes.
+    # This is the same stability prerequisite as Playwright screenshots:
+    # https://playwright.dev/docs/api/class-pageassertions#page-assertions-to-have-screenshot-1
+    import hashlib
+    if backend_property not in ('backend', 'name'):
+        raise ValueError('Unknown renderer identity property')
+    identity = renderer + '.' + backend_property
+    options = {'caret': 'initial', **({'clip': dict(clip)} if clip is not None else {})}
+    previous = None; consecutive = 0; samples = []; capture_errors = []
+    accepted = False
+    report_path = OUT/(name+'-reference.json')
+    image_path = OUT/(name+'-'+backend+'.png')
+    image_path.unlink(missing_ok=True)  # A failed rerun must not retain old evidence.
+    def report():
+        report_path.write_text(json.dumps({'backend':backend,'samples':samples,
+            'stableCaptures':consecutive,'captureErrors':capture_errors,
+            'accepted':accepted, **({'clip': clip} if clip is not None else {})},indent=2))
+    try:
+        for attempt in range(30):
+            check(page.evaluate(identity) == backend, 'Capture used an unexpected renderer')
+            page.evaluate('async()=>{await document.fonts.ready;await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))}')
+            # Do not mutate every input's caret-color. Keep all actual pixels;
+            # an unstable/wrong image still fails the unchanged strict gate.
+            # https://playwright.dev/python/docs/api/class-page#page-screenshot-option-caret
+            try:
+                current = page.screenshot(**options)
+            except PlaywrightTimeoutError as error:
+                # The browser's screenshot command can time out even after
+                # fonts/rAF and backend readiness completed. Retry only that
+                # command once per capture session, on the SAME page. Never
+                # retry a pixel mismatch, reload source, change a backend or
+                # accept prior pixels. The next iteration repeats readiness
+                # checks and must produce three NEW consecutive equal images.
+                capture_errors.append({'attempt':attempt,'error':str(error)})
+                previous = None; consecutive = 0
+                report()  # Preserve the first failure even if recovery fails.
+                if len(capture_errors) > 1:
+                    raise
+                continue
+            check(page.evaluate(identity) == backend, 'Capture used an unexpected renderer')
+            difference = pixels(previous, current) if previous is not None else None
+            samples.append({'attempt': attempt, 'sha256': hashlib.sha256(current).hexdigest(), 'difference': difference})
+            consecutive = consecutive + 1 if difference and difference['changedPixels'] == 0 else 1
+            if consecutive == 3:
+                image_path.write_bytes(current)
+                accepted = True
+                return current
+            if len(samples) == 1: (OUT/(name+'-startup.png')).write_bytes(current)
+            previous = current
+        raise AssertionError('Renderer never reached stable pixels; no capture accepted')
+    finally:
+        report()
+
+
 with sync_playwright() as playwright:
     executable = os.environ.get('CHROMIUM_PATH') or shutil.which('chromium') or playwright.chromium.executable_path
     # Browser flags belong to this test runner, never the shipped IDE/runtime.
@@ -133,7 +192,8 @@ with sync_playwright() as playwright:
                 # Sources: https://gpuweb.github.io/gpuweb/#canvas-context
                 # https://gpuweb.github.io/gpuweb/#automatic-expiry-task-source
                 page.evaluate('async()=>{await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))}')
-                images[backend] = page.screenshot(clip={'x':0,'y':0,'width':256,'height':128}, caret='initial')
+                images[backend] = stable_render_capture(page, f'primitives-capture-{backend}-{dpr}', backend,
+                    'painter', backend_property='name', clip={'x':0,'y':0,'width':256,'height':128})
                 (OUT / f'primitives-{backend}-{dpr}.png').write_bytes(images[backend])
                 if backend == 'webgpu':
                     raw = page.evaluate('''async()=>{
@@ -264,60 +324,6 @@ with sync_playwright() as playwright:
         check(result=={'same':True,'alive':True,'disposed':True,'canvases':0}, str(result));page.close();return result
     case('shared-document reference counts and idempotent cleanup', reference_counts)
 
-    def stable_render_capture(page, name, backend, renderer="vb6Studio.rendering"):
-        # Stabilize each backend independently, without looking at the expected
-        # pixels. The HTML baseline remains fixed throughout comparison. Font-ready
-        # and two rAF callbacks alone do not await asynchronous native raster /
-        # initial MDI layout. Require three identical captures before
-        # comparing; never retry a mismatch against the baseline until it passes.
-        # This is the same stability prerequisite as Playwright screenshots:
-        # https://playwright.dev/docs/api/class-pageassertions#page-assertions-to-have-screenshot-1
-        import hashlib
-        previous = None; consecutive = 0; samples = []; capture_errors = []
-        accepted = False
-        report_path = OUT/(name+'-reference.json')
-        image_path = OUT/(name+'-'+backend+'.png')
-        image_path.unlink(missing_ok=True)  # A failed rerun must not retain old evidence.
-        def report():
-            report_path.write_text(json.dumps({'backend':backend,'samples':samples,
-                'stableCaptures':consecutive,'captureErrors':capture_errors,
-                'accepted':accepted},indent=2))
-        try:
-            for attempt in range(30):
-                check(page.evaluate(renderer+'.backend') == backend, 'Capture used an unexpected renderer')
-                page.evaluate('async()=>{await document.fonts.ready;await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))}')
-                # Do not mutate every input's caret-color. Keep all actual pixels;
-                # an unstable/wrong image still fails the unchanged strict gate.
-                # https://playwright.dev/python/docs/api/class-page#page-screenshot-option-caret
-                try:
-                    current = page.screenshot(caret='initial')
-                except PlaywrightTimeoutError as error:
-                    # The browser's screenshot command can time out even after
-                    # fonts/rAF and backend readiness completed. Retry only that
-                    # command once per capture session, on the SAME page. Never
-                    # retry a pixel mismatch, reload source, change a backend or
-                    # accept prior pixels. The next iteration repeats readiness
-                    # checks and must produce three NEW consecutive equal images.
-                    capture_errors.append({'attempt':attempt,'error':str(error)})
-                    previous = None; consecutive = 0
-                    report()  # Preserve the first failure even if recovery fails.
-                    if len(capture_errors) > 1:
-                        raise
-                    continue
-                check(page.evaluate(renderer+'.backend') == backend, 'Capture used an unexpected renderer')
-                difference = pixels(previous, current) if previous is not None else None
-                samples.append({'attempt': attempt, 'sha256': hashlib.sha256(current).hexdigest(), 'difference': difference})
-                consecutive = consecutive + 1 if difference and difference['changedPixels'] == 0 else 1
-                if consecutive == 3:
-                    image_path.write_bytes(current)
-                    accepted = True
-                    return current
-                if len(samples) == 1: (OUT/(name+'-startup.png')).write_bytes(current)
-                previous = current
-            raise AssertionError('Renderer never reached stable pixels; no capture accepted')
-        finally:
-            report()
-
     def stable_html_reference(page, name):
         return stable_render_capture(page, name, 'html')
 
@@ -444,6 +450,7 @@ with sync_playwright() as playwright:
           n.className='designer-scroll';n.dataset.vbTheme='classic';n.dataset.vbThemeFamily='classic';n.tabIndex=0;
           n.style.cssText='position:fixed;left:32px;top:32px;width:240px;height:180px;max-width:none;max-height:none;flex:none;overflow:scroll;padding:0;z-index:500000';
           const content=document.createElement('div');content.style.cssText='width:800px;height:600px';n.append(content);document.body.append(n);
+          n.completedScrolls=0;n.addEventListener('scrollend',()=>n.completedScrolls++);
         }""")
         dimensions = """()=>{const n=document.querySelector('#native-scrollbar-fixture'),r=n.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height,cw:n.clientWidth,ch:n.clientHeight,sw:n.scrollWidth,sh:n.scrollHeight}}"""
         geometry = page.evaluate(dimensions)
@@ -453,12 +460,23 @@ with sync_playwright() as playwright:
         # Real browser wheel, native increment button and native thumb drag. No
         # JS scrollbar implementation, event swallowing or invisible hit regions.
         page.mouse.move(geometry['x']+70,geometry['y']+60);page.mouse.wheel(80,80)
-        page.wait_for_function("(()=>{const n=document.querySelector('#native-scrollbar-fixture');return n.scrollLeft>0&&n.scrollTop>0})()")
-        page.evaluate("document.querySelector('#native-scrollbar-fixture').scrollTo(0,0)")
+        # wheel() only dispatches input; a nonzero offset can be the FIRST frame
+        # of its animation. Both wheel and arrow scrolling must finish before
+        # resetting and sending the next action to the native scrollbar.
+        # https://playwright.dev/python/docs/api/class-mouse#mouse-wheel
+        page.wait_for_function("(()=>{const n=document.querySelector('#native-scrollbar-fixture');return n.completedScrolls>0&&n.scrollLeft>0&&n.scrollTop>0})()")
+        def reset_scrollport():
+            page.evaluate("""async()=>{
+              const n=document.querySelector('#native-scrollbar-fixture');
+              n.scrollTo({left:0,top:0,behavior:'instant'});
+              await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
+              if(n.scrollLeft!==0||n.scrollTop!==0)throw Error('Native scrollport did not reset: '+n.scrollLeft+','+n.scrollTop);
+            }""")
+        reset_scrollport()
+        completed = page.evaluate("document.querySelector('#native-scrollbar-fixture').completedScrolls")
         page.mouse.click(geometry['x']+geometry['cw']-8,geometry['y']+geometry['h']-8)
-        page.wait_for_function("document.querySelector('#native-scrollbar-fixture').scrollLeft>0")
-        page.evaluate("document.querySelector('#native-scrollbar-fixture').scrollTo(0,0)")
-        page.wait_for_timeout(100)
+        page.wait_for_function("previous=>{const n=document.querySelector('#native-scrollbar-fixture');return n.completedScrolls>previous&&n.scrollLeft>0}", arg=completed)
+        reset_scrollport()
         page.mouse.move(geometry['x']+35,geometry['y']+geometry['h']-8);page.mouse.down()
         # Give the native scrollbar drag loop a display frame to acquire the
         # thumb before dispatching moves, as a physical press would.

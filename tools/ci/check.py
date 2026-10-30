@@ -5,18 +5,8 @@ from pathlib import Path
 import re
 import subprocess
 import yaml
-from browser_partition import BROWSER_SHARDS, appearance_script_names
 
 ROOT = Path(__file__).resolve().parents[2]
-# Only measured slow cells may replace one exhaustive matrix entry with three
-# disjoint owners. Every other include/exclude remains forbidden.
-PARTITIONED_MATRICES = {
-    'browser': [{'suite': 'project-authoring', 'browser': 'webkit'},
-                {'suite': 'integration-appearance', 'browser': 'webkit'}],
-    'figma': [{'suite': group, 'browser': 'webkit', 'transport': 'file'}
-              for group in ('figma-authoring', 'figma-services')],
-    'advanced-editor': [{'browser': 'webkit'}],
-}
 class Loader(yaml.SafeLoader):
     pass
 # YAML 1.1 must not treat the Actions `on` key as boolean True.
@@ -57,27 +47,9 @@ def audit(root=ROOT):
             raise ValueError('Unknown dependency: ' + name)
         # Matrix-axis checks alone do not notice an excluded engine/origin.
         matrix = job.get('strategy', {}).get('matrix', {})
-        if name in PARTITIONED_MATRICES:
-            excluded = PARTITIONED_MATRICES[name]
-            included = [{**cell, 'shard': shard} for cell in excluded for shard in BROWSER_SHARDS]
-            if matrix.get('exclude') != excluded or matrix.get('include') != included:
-                raise ValueError('Only the exact exhaustive browser replacements are permitted: ' + name)
-            axes = {'browser'} | ({'suite'} if name in ('browser', 'figma') else set()) | ({'transport'} if name == 'figma' else set())
-            if set(matrix) != axes | {'include', 'exclude'}:
-                raise ValueError('Browser shards may not expand unrelated matrix cells: ' + name)
-            if "format(', shard {0}/3', matrix.shard)" not in job.get('name', ''):
-                raise ValueError('Browser partition job names must be unique: ' + name)
-            runners = [step for step in job['steps'] if step.get('run', '').startswith('python tools/ci/run.py ')]
-            if len(runners) != 1 or runners[0].get('if') is not None or runners[0].get('env', {}).get('VB6_BROWSER_SHARD') != '${{ matrix.shard }}':
-                raise ValueError('Every browser partition must reach unconditional suite execution: ' + name)
-            uploads = [step for step in job['steps'] if step.get('uses') == 'actions/upload-artifact@v4']
-            if len(uploads) != 1 or "format('-shard-{0}', matrix.shard)" not in uploads[0].get('with', {}).get('name', ''):
-                raise ValueError('Browser partition artifacts must be unique: ' + name)
-        elif matrix.get('exclude') or matrix.get('include'):
+        if matrix.get('exclude') or matrix.get('include'):
             raise ValueError('Validation matrices must be exhaustive Cartesian products: ' + name)
         for axis, values in matrix.items():
-            if axis in ('include', 'exclude'):
-                continue
             if not isinstance(values, list) or not values or len(set(values)) != len(values):
                 raise ValueError('Empty or duplicate matrix axis: ' + name + '/' + axis)
     def visit(name, ancestors):
@@ -125,23 +97,56 @@ def audit(root=ROOT):
     for owner in ('browser', 'figma', 'authoring-exports', 'advanced-editor'):
         if set(jobs[owner]['strategy']['matrix']['browser']) != {'chromium', 'firefox', 'webkit'}:
             raise ValueError('Missing engine: ' + owner)
-    for origin, shard in (('http', '2'), ('file', '3')):
-        command = 'python tools/browser-pascal-tests.py --advanced --origin ' + origin
-        steps = [step for step in jobs['advanced-editor']['steps'] if step.get('run') == command]
-        expected = "!cancelled() && (matrix.browser != 'webkit' || matrix.shard == '" + shard + "')"
-        if len(steps) != 1 or steps[0].get('if') != expected:
-            raise ValueError('Advanced Pascal origins must each retain one bounded WebKit owner: ' + origin)
-    if set(jobs['figma']['strategy']['matrix']['suite']) != {'figma-authoring', 'figma-services'}:
-        raise ValueError('Both disjoint Figma partitions required')
+    if set(jobs['figma']['strategy']['matrix']['suite']) != {'figma-workspace', 'figma-authoring', 'figma-services'}:
+        raise ValueError('All three disjoint Figma partitions required')
     if set(jobs['figma']['strategy']['matrix']['transport']) != {'http', 'file'}:
         raise ValueError('Both real Figma origins required')
+    advanced = jobs['advanced-editor']; advanced_matrix = advanced['strategy']['matrix']
+    if set(advanced_matrix.get('suite', [])) != {'advanced-editor-core', 'advanced-editor-integration'}:
+        raise ValueError('Both disjoint advanced editor partitions required')
+    if set(advanced_matrix.get('transport', [])) != {'http', 'file'}:
+        raise ValueError('Both real advanced editor origins required')
+    if advanced['timeout-minutes'] != 30:
+        raise ValueError('Advanced editor partitions retain the validated main-branch thirty-minute job limit')
+    if not any(step.get('run') == 'python tools/ci/run.py "$SUITE"' and 'if' not in step and
+               step.get('env', {}).get('SUITE') == '${{ matrix.suite }}' and
+               step.get('env', {}).get('VB6_TEST_TRANSPORT') == '${{ matrix.transport }}' and
+               step.get('env', {}).get('VB6_TEST_ADVANCED') == '1' for step in advanced['steps']):
+        raise ValueError('Every advanced partition must run its selected origin with real Monaco enabled')
+    if not any(step.get('uses') == 'actions/download-artifact@v4' and 'if' not in step and
+               step.get('with', {}).get('name') == 'advanced-editor-assets' for step in advanced['steps']):
+        raise ValueError('Advanced editor partitions must consume the actual optional editor build')
+    if not any(step.get('uses') == 'actions/upload-artifact@v4' and
+               step.get('with', {}).get('name') == '${{ matrix.suite }}-${{ matrix.browser }}-${{ matrix.transport }}'
+               for step in advanced['steps']):
+        raise ValueError('Advanced editor evidence must have distinct partition, engine and origin names')
+    def require_pascal(owner, command, condition=None, environment=None):
+        steps = [step for step in jobs[owner]['steps'] if step.get('run') == command]
+        if len(steps) != 1 or steps[0].get('if') != condition or (environment is not None and steps[0].get('env') != environment):
+            raise ValueError('Pascal qualification must retain its complete owner: ' + owner + '/' + command)
+    require_pascal('packages', 'npm exec --yes --package=typescript@5.8.3 -- node tools/test-pascal-types.mjs')
+    require_pascal('browser', 'python tools/browser-pascal-tests.py --origin file',
+                   "!cancelled() && matrix.suite == 'integration-authoring'")
+    require_pascal('advanced-editor', 'python tools/browser-pascal-tests.py --advanced --origin "$TRANSPORT"',
+                   "!cancelled() && matrix.suite == 'advanced-editor-integration'", {'TRANSPORT': '${{ matrix.transport }}'})
+    require_pascal('native-compiler', 'node tools/test-pascal-native.mjs')
+    require_pascal('macos', 'node tools/test-pascal-native.mjs', "runner.os == 'macOS'")
+    require_pascal('linux', 'node tools/test-pascal-native.mjs')
+    require_pascal('linux', 'node tools/test-pascal-native.mjs --toolkit gtk4')
+    for owner, path in [('advanced-editor', 'reports/pascal'), ('native-compiler', 'reports/pascal-native'),
+                        ('macos', 'reports/pascal-native'), ('linux', 'reports/pascal-native')]:
+        if not any(step.get('uses') == 'actions/upload-artifact@v4' and step.get('if') == 'always()' and
+                   path in step.get('with', {}).get('path', '').splitlines() for step in jobs[owner]['steps']):
+            raise ValueError('Pascal qualification must retain failure evidence: ' + owner)
     gpu = jobs['rendering-qualification']['strategy']['matrix']
     if set(gpu['backend']) != {'webgpu', 'webgl2'} or set(gpu['display']) != {'headed', 'headless'}:
         raise ValueError('Missing GPU/display combination')
     if set(jobs['native-com-ole']['strategy']['matrix']['architecture']) != {'x86', 'x64'}:
         raise ValueError('Missing Windows architecture')
-    if set(jobs['macos']['strategy']['matrix']['os']) != {'ubuntu-24.04', 'macos-14', 'macos-15', 'macos-26'}:
+    if set(jobs['macos']['strategy']['matrix']['os']) != {'ubuntu-24.04', 'macos-15', 'macos-26'}:
         raise ValueError('Missing native AOT platform')
+    if set(jobs['macos-browser-native']['strategy']['matrix']['os']) != {'macos-15', 'macos-26'}:
+        raise ValueError('Browser-exported native AOT must execute on both supported Apple Silicon platforms')
     if jobs['macos-browser-native']['needs'] != ['authoring-exports']:
         raise ValueError('Native execution must depend on browser exports')
     for owner in ('linux', 'linux-browser-native', 'linux-native-distribution'):
@@ -187,10 +192,11 @@ def audit(root=ROOT):
     if jobs['advanced-editor']['needs'] != ['advanced-build']:
         raise ValueError('All engines must consume the shared actual editor build')
     suites = json.loads((root / 'tools/ci/suites.json').read_text())
-    appearance_script_names(suites.get('integration-appearance', []))
+    if suites.get('integration-authoring', []).count('browser-pascal-tests.py') != 1:
+        raise ValueError('Classic HTTP Pascal acceptance must retain its authoring owner')
     owners = set(jobs['core-browser']['strategy']['matrix']['suite']) | set(jobs['browser']['strategy']['matrix']['suite'])
     owners |= set(jobs['figma']['strategy']['matrix']['suite'])
-    owners |= {'authoring-exports', 'advanced-editor', 'code-gpu'}
+    owners |= set(advanced_matrix['suite']) | {'authoring-exports', 'code-gpu'}
     if set(suites) != owners:
         raise ValueError('Unowned or missing suite group')
     for group, scripts in suites.items():
@@ -205,12 +211,33 @@ def audit(root=ROOT):
     browser_groups = jobs['browser']['strategy']['matrix']['suite']
     if 'tui-authoring' not in browser_groups or suites.get('tui-authoring') != ['dos-browser-tests.py']:
         raise ValueError('Dedicated TUI acceptance partition required')
+    # Application appearance and core boundaries each need an independent
+    # bounded owner; retain every case and the existing interaction deadlines.
+    if 'application-appearance' not in browser_groups or suites.get('application-appearance') != ['browser-application-theme-tests.py']:
+        raise ValueError('Dedicated application appearance acceptance partition required')
+    if jobs['browser']['timeout-minutes'] != 25:
+        raise ValueError('Browser partitions retain the twenty-five-minute job limit')
+    core_groups = jobs['core-browser']['strategy']['matrix']['suite']
+    if 'core-boundaries' not in core_groups or suites.get('core-boundaries') != ['browser-boundaries-06.py']:
+        raise ValueError('Dedicated core boundaries acceptance partition required')
+    if suites.get('core-recovery') != ['recovery-browser-tests.py', 'browser-finalization-05.py']:
+        raise ValueError('Core recovery must retain both recovery and finalization suites')
+    if jobs['core-browser']['timeout-minutes'] != 15:
+        raise ValueError('Core partitions retain the fifteen-minute job limit')
+    core_scripts = [script for group in core_groups for script in suites[group]]
+    if len(core_scripts) != len(set(core_scripts)):
+        raise ValueError('Core partitions may not duplicate any test entrypoint')
     browser_scripts = [script for group in browser_groups for script in suites[group]]
     if len(browser_scripts) != len(set(browser_scripts)):
         raise ValueError('Browser partitions may not duplicate any test entrypoint')
     figma_scripts = [script for group in jobs['figma']['strategy']['matrix']['suite'] for script in suites[group]]
+    if suites.get('figma-workspace') != ['figma-browser-tests.py']:
+        raise ValueError('Dedicated Figma workspace acceptance partition required')
     if len(figma_scripts) != len(set(figma_scripts)):
         raise ValueError('Figma partitions may not duplicate any test entrypoint')
+    if suites.get('advanced-editor-core') != ['browser-advanced-editor-tests.py'] or suites.get('advanced-editor-integration') != [
+            'browser-input-modes-tests.py', 'browser-tui-advanced-tests.py', 'figma-advanced-editor-browser-tests.py']:
+        raise ValueError('Balanced advanced editor partitions must preserve all four independent suites')
     text = '\n'.join(p.read_text() for p in paths)
     pending = re.findall(r'npm run ([\w:-]+)', text); seen = set()
     while pending:

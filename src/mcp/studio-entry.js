@@ -1,3 +1,4 @@
+import {installInputModes} from '../ide/input-modes.js';
 import {installDOSWorkspace} from '../ide/dos-mode.js';
 import {installFigmaMode} from '../ide/figma-mode.js';
 import {installAdvancedEditor} from '../ide/advanced-editor.js';
@@ -30,6 +31,7 @@ if (globalThis.vb6Studio) {
   installAdvancedEditor(globalThis.vb6Studio);
   installFigmaMode(globalThis.vb6Studio);
   installDOSWorkspace(globalThis.vb6Studio);
+  installInputModes(globalThis.vb6Studio);
 }
 
-export {installDOSWorkspace, installFigmaMode, installXaml, installStudioRendering, installAutoLayout, VB6Studio, StudioAPI, installMcp};
+export {installInputModes, installDOSWorkspace, installFigmaMode, installXaml, installStudioRendering, installAutoLayout, VB6Studio, StudioAPI, installMcp};
