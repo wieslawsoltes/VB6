@@ -3,14 +3,14 @@ import {safeName} from '../core/core.js';
 import {writeZip} from '../project/zip.js';
 import {bindApplicationTheme} from '../theme/application-appearance.js';
 
-/** A closed form may leave the VM idle rather than stopped. Loaded hidden or
+/** Closing the last form leaves the event-loop VM running rather than stopped. Loaded hidden or
  * minimized forms still own a running application and must never be duplicated. */
 export function canRelaunchApplication(host) {
   if (!host || host.disposed) return true;
   const vm = host.vm;
   if (!vm) return false;
   if (vm.state === 'stopped' || vm.state === 'error') return true;
-  return vm.state === 'idle' && !vm.stack?.length && !vm.processing &&
+  return ['idle', 'running'].includes(vm.state) && !vm.stack?.length && !vm.processing && !vm.eventQueue?.length &&
     ![...(vm.formInstances || [])].some(instance => instance.loaded);
 }
 

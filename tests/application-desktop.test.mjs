@@ -19,7 +19,7 @@ test('the desktop lists immediate folders/files and preserves exact binary and t
 });
 
 test('closed forms can relaunch while hidden loaded forms, active work and paused VMs cannot', () => {
-  const host = {vm:{state:'idle',stack:[],processing:false,formInstances:new Set([{loaded:false}])}};
+  const host = {vm:{state:'running',stack:[],processing:false,formInstances:new Set([{loaded:false}])}};
   assert.equal(canRelaunchApplication(host),true);
   host.vm.formInstances.add({loaded:true});assert.equal(canRelaunchApplication(host),false);
   host.vm.formInstances.clear();host.vm.processing=true;assert.equal(canRelaunchApplication(host),false);

@@ -18,6 +18,7 @@ const catalog = EXAMPLES.map(example => {
   return example.id;
 });
 write('gallery', exportApplicationFiles(applicationThemeGallery('fluent-dark'), {persist: false}));
+write('desktop-persist', exportApplicationFiles(JSON.parse(fs.readFileSync(path.join(root, 'examples/orders.vb6web'))), {nativeWindows: false}));
 const project = newProject('Export lifecycle'); project.id = 'export-lifecycle-fixture';
 project.vfs.files['/binary.dat'] = {encoding: 'base64', data: 'AP+A'};
 project.appSettings = {initial: 'authored'};
