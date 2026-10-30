@@ -9,8 +9,8 @@ const compile=body=>compileWin32(project('Sub Main\n'+body+'\nEnd Sub'));
 for(const optimization of [0,1,2])test(`sequential file fixture is deterministic native PE32 at O${optimization}`,()=>{
   const {project:p,checks}=nativeControlFixtures().find(f=>f.project.name==='AotControlSequentialFiles');
   const before=JSON.stringify(p),a=compileWin32(p,{optimization});assert.deepEqual(a.bytes,compileWin32(p,{optimization}).bytes);assert.equal(JSON.stringify(p),before);
-  assert.equal(checks.length,34);assert.equal(a.report.target,'win32-aot');assert.equal(a.report.extraction,false);
-  for(const symbol of ['CreateFileW','WriteFile','CloseHandle','SetEndOfFile','GetFileInformationByHandle','ReadFile','WideCharToMultiByte','OutputDebugStringW'])assert.ok(a.report.imports.some(i=>i.symbol===symbol),symbol);
+  assert.equal(checks.length,39);assert.equal(a.report.target,'win32-aot');assert.equal(a.report.extraction,false);
+  for(const symbol of ['CreateDirectoryW','RemoveDirectoryW','CreateFileW','WriteFile','CloseHandle','SetEndOfFile','GetFileInformationByHandle','ReadFile','WideCharToMultiByte','OutputDebugStringW'])assert.ok(a.report.imports.some(i=>i.symbol===symbol),symbol);
 });
 test('original Order Entry sample compiles unchanged at every optimization level',()=>{
   const p=JSON.parse(fs.readFileSync(new URL('../examples/orders.vb6web',import.meta.url),'utf8')),before=JSON.stringify(p);

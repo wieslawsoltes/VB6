@@ -6,8 +6,8 @@ import {setResourceString, setResource} from './res.js';
 function c(type,name,x,y,w,h,props={},parent=null){const node=createControl(type,name,x*15,y*15);Object.assign(node.properties,{Width:w*15,Height:h*15,...props});node.parent=parent;return node;}
 function formProject(name,formName,caption,width,height){const p=newProject(name),form=createForm(formName,caption);form.form.properties.ClientWidth=width*15;form.form.properties.ClientHeight=height*15;p.modules=[form];p.startup=formName;return {p,form};}
 export function orderEntryExample(){const {p,form}=formProject('Project1','frmOrders','Order Entry',648,446);p.description='Classic order-entry form with real VB event handlers, control properties, private file I/O and persistence.';
-  // The authored Save handler uses this folder. Open For Output creates the
-  // file, not missing parent directories; seed the sample's private data disk.
+  // Present the order folder immediately in the browser's private disk. The
+  // Save handler also creates it for fresh native working directories.
   p.vfs.directories.push('/Orders');
   form.form.controls=[
     c('Label','lblTitle',20,16,420,28,{Caption:'Northwind Traders',FontSize:16,FontBold:-1,ForeColor:8388608}),
@@ -107,9 +107,15 @@ End Sub
 Private Sub cmdSave_Click()
     On Error GoTo SaveError
     Dim fileNumber As Integer
+    Dim fileOpen As Boolean
+    Dim filePath As String
+    Dim saveError As String
     Dim i As Long
+    EnsureOrdersFolder
+    filePath = "Orders/Order-" & txtOrderNo.Text & ".txt"
     fileNumber = FreeFile
-    Open "Orders/Order-" & txtOrderNo.Text & ".txt" For Output As #fileNumber
+    Open filePath For Output As #fileNumber
+    fileOpen = True
     Print #fileNumber, "NORTHWIND TRADERS"
     Print #fileNumber, "Order: " & txtOrderNo.Text
     Print #fileNumber, "Customer: " & cboCustomer.Text
@@ -118,11 +124,23 @@ Private Sub cmdSave_Click()
     Next i
     Print #fileNumber, "TOTAL: " & lblTotal.Caption
     Close #fileNumber
+    fileOpen = False
     StatusBar1.SimpleText = "Order " & txtOrderNo.Text & " saved."
-    MsgBox "The order was saved in this application's private virtual disk.", vbInformation, "Order saved"
+    MsgBox "The order was saved to " & filePath & ".", vbInformation, "Order saved"
     Exit Sub
 SaveError:
-    MsgBox Err.Description, vbExclamation, "Save error"
+    saveError = Err.Description
+    On Error Resume Next
+    If fileOpen Then Close #fileNumber
+    MsgBox saveError, vbExclamation, "Save error"
+End Sub
+
+Private Sub EnsureOrdersFolder()
+    On Error GoTo CreateError
+    MkDir "Orders"
+    Exit Sub
+CreateError:
+    If Err.Number <> 58 Then Err.Raise Err.Number, Err.Source, Err.Description
 End Sub
 
 Private Sub cmdClose_Click()
