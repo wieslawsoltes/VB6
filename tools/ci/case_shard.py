@@ -19,11 +19,12 @@ import traceback
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
-# Explicit report bindings: both suites already expose these configuration
+# Explicit report bindings: these suites already expose their configuration
 # globals. Never rewrite ROOT, the URL, the fixture, or any test method.
 REPORT_BINDINGS = {
     'native-project-browser-tests.py': ('REPORT',),
     'figma-services-browser-tests.py': ('base', 'REPORT'),
+    'browser-input-modes-tests.py': ('REPORT',),
 }
 
 

@@ -23,7 +23,7 @@ import case_shard
 ROOT = Path(__file__).resolve().parents[2]
 ENGINES = ('chromium', 'firefox', 'webkit')
 # Keep the process bounds already qualified on current main. Splitting the
-# two slow suites into isolated workers does not relax their action deadlines.
+# measured slow suites into isolated workers does not relax action deadlines.
 # Memory transport and all other engines retain the ordinary eight-minute bound.
 SCRIPT_TIMEOUTS = {
     # Validate #1493 passed 46/53 appearance cases before the 480s batch
@@ -86,7 +86,7 @@ def plan(group, engine, transport, root=ROOT):
             # two isolated processes; every other invocation stays unchanged.
             if engine == 'webkit' and origin != 'memory' and (
                     script == 'native-project-browser-tests.py' or
-                    (script == 'figma-services-browser-tests.py' and origin == 'file')):
+                    (script in ('figma-services-browser-tests.py', 'browser-input-modes-tests.py') and origin == 'file')):
                 task['caseShards'] = 2
             result.append(task)
     return result
@@ -164,7 +164,7 @@ def execute_case_shards(task, root, env, log, timeout, cancelled, execute_fn=exe
     """Bounded parallelism within one owned suite, with complete-case admission."""
     count = task.get('caseShards')
     if type(count) is not int or count != 2 or task['script'] not in case_shard.REPORT_BINDINGS:
-        raise ValueError('Only the two declared browser suites may use two case workers')
+        raise ValueError('Only declared browser suites may use two case workers')
     if task['argv'] != [sys.executable, str(root / 'tools' / task['script'])]:
         raise ValueError('Case workers cannot discard original command-line arguments')
     execution_id = uuid.uuid4().hex

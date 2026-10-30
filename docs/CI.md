@@ -118,16 +118,24 @@ later source revision.
 
 Validate #1474 completed all advanced-editor and rendering partitions, but the
 WebKit native-project process exhausted 720 seconds and WebKit/file Figma services
-exhausted 480 seconds while completed cases continued passing. Those two script
+exhausted 480 seconds while completed cases continued passing. Those script
 invocations now use **two concurrent, isolated unittest workers inside their
 existing job**. Case workers add no workflow jobs and increase no job, process,
 assertion or pixel budget. There are no retries and no newly skipped cases.
+
+Validate #1494 then completed 24 of 25 WebKit/file input-mode cases before its
+900-second process deadline. That invocation uses the same two-worker path,
+retaining the 900-second bound, all twenty core cases and all five real Monaco
+cases. HTTP and other engines retain their existing serial execution.
 
 `tools/ci/case_shard.py` discovers the original complete unittest inventory,
 including dynamic HTTP/file registration and each module's `load_tests` hook.
 Sorted contiguous halves give native projects 30 cases per worker, each with
 15 HTTP and 15 file cases. Figma services retains all 21 cases, partitioned 10/11,
-including the existing engine/capability decorators. Each worker owns a browser,
+including the existing engine/capability decorators. Input modes uses 12/13
+cases when Monaco is requested, or 10/10 for the original core-only loader. The
+original `load_tests` hook determines whether Monaco is part of the inventory;
+the worker cannot substitute a smaller list. Each worker owns a browser,
 contexts, server and a separate `case-shard-<index>-of-2` report directory. All
 other scripts, Chromium/Firefox invocations, and the explicitly labelled local
 memory mode retain their ordinary scheduling.
@@ -145,7 +153,7 @@ methods, input fixtures, and assertions are not rewritten by the shard driver.
 The Figma service-persistence reload uses the same bounded 60-second startup
 readiness as its initial boot, still requiring the restored enabled workspace.
 Its eight-second widget-interaction deadline remains unchanged. The named Node
-regression `tests/ci-browser-case-shard.test.mjs` runs all 26 Python regressions
+regression `tests/ci-browser-case-shard.test.mjs` runs all 27 Python regressions
 through the existing mandatory test glob, rejecting a missing interpreter in CI
 and requiring completion without skips. These include independent inventory
 checks and real subprocess failure/cancellation regressions. Local

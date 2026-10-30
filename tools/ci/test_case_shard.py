@@ -268,8 +268,11 @@ def load_tests(loader, standard, pattern):
                 for group in ('project-authoring', 'figma-services', 'advanced-editor-integration'):
                     tasks = run.plan(group, engine, origin)
                     expected = {SCRIPT} if engine == 'webkit' and origin != 'memory' and group == 'project-authoring' else set()
-                    if engine == 'webkit' and origin == 'file' and group == 'figma-services':
-                        expected = {'figma-services-browser-tests.py'}
+                    if engine == 'webkit' and origin == 'file':
+                        if group == 'figma-services':
+                            expected = {'figma-services-browser-tests.py'}
+                        elif group == 'advanced-editor-integration':
+                            expected = {'browser-input-modes-tests.py'}
                     self.assertEqual({t['script'] for t in tasks if t.get('caseShards')}, expected)
                     for task in tasks:
                         self.assertEqual(task['argv'], [sys.executable, str(run.ROOT / 'tools' / task['script'])])
@@ -303,6 +306,32 @@ def load_tests(loader, standard, pattern):
             self.assertTrue(case.passed)
             self.assertEqual(calls, [('reload', {'wait_until': 'commit', 'timeout': 60000}),
                 ('ready', 'globalThis.vb6Studio?.figmaMode?.enabled', {'polling': 100, 'timeout': 60000})])
+
+    def test_input_mode_partitions_retain_core_and_optional_monaco_inventories(self):
+        script = 'browser-input-modes-tests.py'
+        tree = ast.parse((run.ROOT / 'tools' / script).read_text())
+        classes = {node.name: node for node in tree.body if isinstance(node, ast.ClassDef)}
+        def methods(name):
+            return [name + '.' + node.name for node in classes[name].body
+                    if isinstance(node, ast.FunctionDef) and node.name.startswith('test_')]
+        core = methods('InputModeAcceptance')
+        advanced = methods('AdvancedInputModeAcceptance')
+        self.assertEqual((len(core), len(advanced)), (20, 5))
+        sync_api = types.ModuleType('playwright.sync_api')
+        sync_api.sync_playwright = lambda *args, **kwargs: self.fail('Discovery must not start a browser')
+        with patch.dict(sys.modules, {'playwright': types.ModuleType('playwright'), 'playwright.sync_api': sync_api}):
+            for enabled in ('0', '1'):
+                with self.subTest(advanced=enabled), patch.dict(os.environ, {'VB6_TEST_ADVANCED': enabled}):
+                    module = case_shard.load_module(run.ROOT, script)
+                    ids = [case.id() for case in case_shard.discover(module)]
+                    expected = sorted(core + (advanced if enabled == '1' else []))
+                    self.assertEqual([name.split('.', 1)[1] for name in ids], expected)
+                    halves = [case_shard.partition(ids, index, 2) for index in (1, 2)]
+                    self.assertEqual(halves[0] + halves[1], ids)
+                    self.assertEqual([len(half) for half in halves], [12, 13] if enabled == '1' else [10, 10])
+                    report = module.REPORT
+                    case_shard.isolate_reports(module, run.ROOT, script, 1, 2)
+                    self.assertEqual(module.REPORT, report / 'case-shard-1-of-2')
 
     def test_actual_native_and_figma_inventories_match_independent_source_scan(self):
         # Discovery is dependency-free: browser APIs are never called. This

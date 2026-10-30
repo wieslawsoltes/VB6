@@ -20,9 +20,9 @@ test('Browser case workers preserve complete coverage, isolation, failures and c
   }
   assert.ifError(result.error);
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stderr, /Ran 26 tests/);
+  assert.match(result.stderr, /Ran 27 tests/);
   assert.match(result.stderr, /\nOK\s*$/);
-  t.diagnostic('All 26 Python case-worker regressions executed without skips.');
+  t.diagnostic('All 27 Python case-worker regressions executed without skips.');
 });
 
 
