@@ -113,7 +113,12 @@ try:
     page.wait_for_function('vb6Studio.editor.input.value===dosSourceBefore')
     assert page.evaluate('JSON.stringify(vb6Studio.project)===dosBaseline')
     gutter = page.locator('.source-editor:visible .gutter-line[data-line="3"]')
-    gutter.click()
+    # The asynchronous diagnostics worker can repaint after pointerdown. Its
+    # result must not detach the pressed gutter row and lose the native click.
+    gutter.hover()
+    page.mouse.down()
+    page.evaluate('vb6Studio.editor.setDiagnostics(vb6Studio.editor.diagnostics)')
+    page.mouse.up()
     page.wait_for_function('vb6Studio.breakpoints.some(b=>b.line===3)')
     page.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
     assert page.evaluate("vb6Studio.dosMode.sessions.get(document).chrome.entries.get(vb6Studio.editor.gutter).buffer.toText().includes('•')")

@@ -136,8 +136,44 @@ export class SourceEditor extends Signal {
   schedulePaint(){if(this.paintFrame||this.disposed)return;this.paintWindow=this.root.ownerDocument.defaultView;this.paintFrame=this.paintWindow.requestAnimationFrame(()=>{this.paintFrame=0;this.paint();});}
   paint(){if(!this.module||this.disposed)return;this.metrics.paints++;this.root.style.setProperty('--editor-gutter',this.appearance.margin===false?'0px':this.showLineNumbers?'32px':'18px');const breakpoints=new Set(this.breakpoints.filter(b=>lower(b.module)===lower(this.module.name)).map(b=>b.line)),separators=new Set(this.procedureIndex.map(p=>p.line)),bookmarks=new Set(this.module.bookmarks||[]);
     for(const pane of this.panes){const {input,viewport,syntax,gutter,lines,range}=pane,top=input.scrollTop,left=input.scrollLeft,first=Math.max(0,Math.floor((top-4)/this.lineHeight)),count=Math.ceil(viewport.clientHeight/this.lineHeight)+3,last=Math.min(lines.length,first+count),selection=this.selectionBounds(pane),select=this.root.ownerDocument.activeElement===input&&selection.start!==selection.end,selectionStart=selection.start-range.start,selectionEnd=selection.end-range.start;
-      syntax.style.transform=`translate(${-left}px,${first*this.lineHeight-top}px)`;const html=lines.slice(first,last).map((line,i)=>{const n=range.firstLine+i+first+1,bp=breakpoints.has(n),exec=this.execution?.module===this.module.name&&this.execution.line===n,execStart=exec&&this.execution.column?this.execution.column-1:-1,execEnd=exec&&this.execution.endColumn?this.execution.endColumn-1:-1,separator=this.appearance.procedureSeparators&&separators.has(n)&&n>1,start=this.lineStarts[n-1]-range.start;return `<div class="syntax-line${bp?' breakpoint-line':''}${exec?' execution-line'+(execStart>=0?' execution-range':''):''}${separator?' procedure-start':''}">${this.highlightCache.get(line+'\0'+(select?Math.max(-1,selectionStart-start):-1)+':'+(select?Math.min(line.length+1,selectionEnd-start):-1)+':'+execStart+':'+execEnd,()=>highlightLine(line,select?selectionStart-start:-1,select?selectionEnd-start:-1,execStart,execEnd))}</div>`;}).join('');if(pane.lastHTML!==html){syntax.innerHTML=html;pane.lastHTML=html;this.metrics.domUpdates++;}const gutterKey=[first,last,this.showLineNumbers,[...breakpoints].join(','),[...bookmarks].join(','),this.execution?.line,this.execution?.module,this.diagnosticRevision].join('|');if(pane.gutterKey===gutterKey){for(const child of gutter.children)child.style.top=(4+(Number(child.dataset.line)-range.firstLine-1)*this.lineHeight-top)+'px';continue;}pane.gutterKey=gutterKey;gutter.replaceChildren();this.metrics.domUpdates++;for(let i=first;i<last;i++){const line=range.firstLine+i+1,bp=breakpoints.has(line),error=this.diagnosticMap?.get(lower(this.module.name)+':'+line),exec=this.execution?.module===this.module.name&&this.execution.line===line;gutter.append(el('div',{class:'gutter-line'+(bp?' has-breakpoint':'')+(error?' has-error':'')+(exec?' has-execution':'')+(bookmarks.has(line)?' has-bookmark':''),'data-line':line,title:error?.message||(bp?'Remove breakpoint':'Set breakpoint'),style:{top:(4+i*this.lineHeight-top)+'px'}},exec?icon('arrow-right',12):bp?el('span',{class:'breakpoint-dot'}):bookmarks.has(line)?el('span',{class:'bookmark-symbol',title:'Bookmark — Ctrl+click to remove'}):this.showLineNumbers?String(line):''));}}
+      syntax.style.transform=`translate(${-left}px,${first*this.lineHeight-top}px)`;const html=lines.slice(first,last).map((line,i)=>{const n=range.firstLine+i+first+1,bp=breakpoints.has(n),exec=this.execution?.module===this.module.name&&this.execution.line===n,execStart=exec&&this.execution.column?this.execution.column-1:-1,execEnd=exec&&this.execution.endColumn?this.execution.endColumn-1:-1,separator=this.appearance.procedureSeparators&&separators.has(n)&&n>1,start=this.lineStarts[n-1]-range.start;return `<div class="syntax-line${bp?' breakpoint-line':''}${exec?' execution-line'+(execStart>=0?' execution-range':''):''}${separator?' procedure-start':''}">${this.highlightCache.get(line+'\0'+(select?Math.max(-1,selectionStart-start):-1)+':'+(select?Math.min(line.length+1,selectionEnd-start):-1)+':'+execStart+':'+execEnd,()=>highlightLine(line,select?selectionStart-start:-1,select?selectionEnd-start:-1,execStart,execEnd))}</div>`;}).join('');if(pane.lastHTML!==html){syntax.innerHTML=html;pane.lastHTML=html;this.metrics.domUpdates++;}this.paintGutter(pane,first,last,top,breakpoints,bookmarks);}
   }
+  paintGutter(pane,first,last,top,breakpoints,bookmarks){
+    const {gutter,range}=pane,rows=pane.gutterRows||=new Map();
+    const firstLine=range.firstLine+first+1,lastLine=range.firstLine+last;
+    const key=[this.module.id||this.module.name,range.firstLine,first,last,this.showLineNumbers,[...breakpoints].join(','),[...bookmarks].join(','),this.execution?.line,this.execution?.module,this.diagnosticRevision].join('|');
+    if(pane.gutterKey!==key){
+      pane.gutterKey=key;let changed=false,next=null;
+      for(const [line,row]of rows)if(line<firstLine||line>lastLine){row.node.remove();rows.delete(line);changed=true;}
+      // A diagnostic result can arrive between pointerdown and pointerup. Keep
+      // each visible line's hit target attached so the native click still owns
+      // its source line. The DOS presentation canvas is not an editor row.
+      for(let line=lastLine;line>=firstLine;line--){
+        let row=rows.get(line);
+        if(!row){
+          const node=gutter.ownerDocument.createElement('div');node.dataset.line=String(line);
+          row={node,marker:null};rows.set(line,row);gutter.insertBefore(node,next);changed=true;
+        }
+        next=row.node;
+        const bp=breakpoints.has(line),bookmark=bookmarks.has(line),error=this.diagnosticMap?.get(lower(this.module.name)+':'+line),exec=this.execution?.module===this.module.name&&this.execution.line===line;
+        const className='gutter-line'+(bp?' has-breakpoint':'')+(error?' has-error':'')+(exec?' has-execution':'')+(bookmark?' has-bookmark':'');
+        const title=error?.message||(bp?'Remove breakpoint':'Set breakpoint');
+        if(row.node.className!==className){row.node.className=className;changed=true;}
+        if(row.node.title!==title){row.node.title=title;changed=true;}
+        const marker=exec?'execution':bp?'breakpoint':bookmark?'bookmark':this.showLineNumbers?'line':'';
+        if(row.marker!==marker){
+          row.marker=marker;changed=true;
+          row.node.replaceChildren(exec?icon('arrow-right',12):bp?el('span',{document:gutter.ownerDocument,class:'breakpoint-dot'}):bookmark?el('span',{document:gutter.ownerDocument,class:'bookmark-symbol',title:'Bookmark — Ctrl+click to remove'}):this.showLineNumbers?String(line):'');
+        }
+      }
+      if(changed)this.metrics.domUpdates++;
+    }
+    for(const [line,row]of rows){
+      const y=(4+(line-range.firstLine-1)*this.lineHeight-top)+'px';
+      if(row.node.style.top!==y)row.node.style.top=y;
+    }
+  }
+
   selectionBounds(pane=this.activePane){return pane.virtualizer?.selection()||{start:pane.range.start+pane.input.selectionStart,end:pane.range.start+pane.input.selectionEnd};}
   cursor(){return positionAt(this.index,this.selectionBounds().start);}
   cursorChanged(){if(!this.module)return;const pendingInput=this.input.value!==this.text.slice(this.activePane.range.start,this.activePane.range.end),cursor=this.cursor();if(!pendingInput&&!this.changingSource&&this.completion&&cursor.offset!==this.completionCaret)this.closeCompletion();if(!pendingInput&&!this.changingSource&&this.info&&cursor.offset!==this.infoOffset)this.closeInfo();this.emit('cursor',cursor);let p=null;for(const value of this.procedureIndex){if(value.line>cursor.line)break;p=value;}if(!this.selectedObject||this.selectedObject==='(General)')this.procedures.value=p&&!this.activePane.explicitDeclarations?String(p.line):'';else if(p&&lower(p.name).startsWith(lower(this.selectedObject)+'_'))this.procedures.value=String(p.line);this.paint();}
