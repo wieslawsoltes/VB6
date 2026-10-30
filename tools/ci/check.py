@@ -106,8 +106,10 @@ def audit(root=ROOT):
         raise ValueError('Missing GPU/display combination')
     if set(jobs['native-com-ole']['strategy']['matrix']['architecture']) != {'x86', 'x64'}:
         raise ValueError('Missing Windows architecture')
-    if set(jobs['macos']['strategy']['matrix']['os']) != {'ubuntu-24.04', 'macos-14', 'macos-15', 'macos-26'}:
+    if set(jobs['macos']['strategy']['matrix']['os']) != {'ubuntu-24.04', 'macos-15', 'macos-26'}:
         raise ValueError('Missing native AOT platform')
+    if set(jobs['macos-browser-native']['strategy']['matrix']['os']) != {'macos-15', 'macos-26'}:
+        raise ValueError('Browser-exported native AOT must execute on both supported Apple Silicon platforms')
     if jobs['macos-browser-native']['needs'] != ['authoring-exports']:
         raise ValueError('Native execution must depend on browser exports')
     for owner in ('linux', 'linux-browser-native', 'linux-native-distribution'):
@@ -170,6 +172,22 @@ def audit(root=ROOT):
     browser_groups = jobs['browser']['strategy']['matrix']['suite']
     if 'tui-authoring' not in browser_groups or suites.get('tui-authoring') != ['dos-browser-tests.py']:
         raise ValueError('Dedicated TUI acceptance partition required')
+    # Application appearance and core boundaries each need an independent
+    # bounded owner; retain every case and the existing interaction deadlines.
+    if 'application-appearance' not in browser_groups or suites.get('application-appearance') != ['browser-application-theme-tests.py']:
+        raise ValueError('Dedicated application appearance acceptance partition required')
+    if jobs['browser']['timeout-minutes'] != 25:
+        raise ValueError('Browser partitions retain the twenty-five-minute job limit')
+    core_groups = jobs['core-browser']['strategy']['matrix']['suite']
+    if 'core-boundaries' not in core_groups or suites.get('core-boundaries') != ['browser-boundaries-06.py']:
+        raise ValueError('Dedicated core boundaries acceptance partition required')
+    if suites.get('core-recovery') != ['recovery-browser-tests.py', 'browser-finalization-05.py']:
+        raise ValueError('Core recovery must retain both recovery and finalization suites')
+    if jobs['core-browser']['timeout-minutes'] != 15:
+        raise ValueError('Core partitions retain the fifteen-minute job limit')
+    core_scripts = [script for group in core_groups for script in suites[group]]
+    if len(core_scripts) != len(set(core_scripts)):
+        raise ValueError('Core partitions may not duplicate any test entrypoint')
     browser_scripts = [script for group in browser_groups for script in suites[group]]
     if len(browser_scripts) != len(set(browser_scripts)):
         raise ValueError('Browser partitions may not duplicate any test entrypoint')

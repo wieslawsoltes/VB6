@@ -246,6 +246,14 @@ and state; set `responsive:false` for explicit `setViewport({width,height})`
 control. `UIRuntime.resize` and the client's `resize` request use the compiled
 program without source parsing. The headless default is 1024 by 768.
 
+Surface mutations and their incremental render results share one ordered queue.
+An input received while a viewport response is pending waits for that response
+and uses its applied version; it executes once without replaying the input.
+Source replacement still revokes queued old handlers and effects. A responsive
+branch that removes the original handler rejects the interaction instead of
+redirecting it to the replacement control. Host approval promises use a separate
+queue, so an unanswered review cannot block source or viewport updates.
+
 The IDE includes a **Responsive dashboard** example. The catalog now exposes
 trusted named SVG icons, image `aspectRatio`/`objectFit` and rendered metric
 `change` text. Unknown icon names, CSS expressions and invalid ratios are rejected.

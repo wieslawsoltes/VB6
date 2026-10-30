@@ -84,7 +84,32 @@ execute unconditionally in the audit job. The pinned, SHA-256-verified actionlin
 syntax and expression types. Historical timings or results do not qualify a
 later source revision.
 
+## Screenshot command recovery
+
+Agent-transcript captures require three consecutive identical images, independently
+of the expected reference, within the original twelve-attempt limit. A single
+Playwright screenshot-command timeout may be retried on the same page, with the
+same renderer, viewport and unmodified caret. That retry discards all pre-timeout
+stability and must obtain three fresh consecutive images. A second timeout,
+readiness failure, backend change or non-timeout browser error fails immediately.
+Pixel mismatches are never retried, references are never updated, and GPU
+requirements are unchanged. Per-capture JSON preserves timeouts, sample hashes
+and the acceptance result even on failure; a failed rerun removes old accepted
+images. These transport checks run through the required Node test discovery.
+
+The primitive presentation oracle uses the same reference-independent helper as
+whole-IDE rendering, with the existing 256x128 clip and the low-level painter’s
+actual name as its backend identity. Its three stable presentation captures must
+finish before any diagnostic framebuffer readback; recovery never replays the
+scene or uses readback to repair a screenshot. Both blank presentation with a
+correct framebuffer and incorrect readback with correct presentation still fail.
+
 ## Publication boundary
+
+A skipped Pages run after failed **Validate** is an intentional publication
+block, not a successful deployment. Fix and validate current `main`; the
+successful push validation triggers Pages automatically. Do not bypass the gate
+or redeploy an older successful revision to hide current failures.
 
 Pages accepts only successful **Validate** pushes to this repository's current
 `main`. It checks the event, repository and exact SHA, then rebuilds that source
@@ -143,3 +168,36 @@ the flag can reject requests before service-worker fetch dispatch. This is not
 certification that WebKit's offline emulation works. The report records the
 transport distinction, worker response and negative control explicitly. All
 update, cache isolation, integrity, actual ZIP and network-only API checks remain.
+
+## Supported Apple Silicon runners
+
+Native AOT and execution of browser-exported applications run on both `macos-15`
+and `macos-26`, the supported standard Apple Silicon images. The portable helper
+oracle continues to run on Ubuntu. Every native execution, signature, archive,
+AppKit and macOS 26 appearance check remains required on its existing owner.
+The coverage audit requires both macOS platforms for both native job families.
+
+The retired `macos-14` jobs were removed after GitHub's scheduled image brownout
+cancelled both jobs before a runner or test step started. This does not change
+the compiler's deployment target or assert new macOS 14 compatibility evidence;
+macOS 14 is no longer qualified by hosted CI. GitHub retires that image on
+November 2, 2026. See the [runner retirement notice](https://github.com/actions/runner-images/issues/13518)
+and [official image/architecture table](https://github.com/actions/runner-images#available-images).
+
+## Complete core and appearance suite budgets
+
+Core boundaries have their own required `core-boundaries` job. The original
+recovery and finalization entrypoints remain together in `core-recovery`. All
+three scripts and their cases still run exactly once, with the existing
+15-minute job and per-script limits. This prevents the cumulative group budget
+from cancelling the last boundary cases after recovery and finalization passed.
+The audit rejects missing owners, exchanged ownership, duplicate entrypoints or
+longer job limits.
+
+The application-appearance matrix likewise has its own Chromium/Firefox/WebKit
+owner, separate from IDE themes. Its WebKit HTTP/file process budget is 900
+seconds, as qualified on PR #153 after 46 of 53 cases exhausted the old 480-second
+suite budget. Individual interaction deadlines and every pixel comparison stay
+unchanged; explicit caller timeouts still take precedence. Other browser suites
+keep their previous limits, and the aggregate `test` gate still requires every
+job to succeed.
