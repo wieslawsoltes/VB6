@@ -87,7 +87,7 @@ The reusable, dependency-free `@vb6/auto-layout` package includes ES module/brow
 
 ### Optional Turbo Pascal
 
-Choose **Turbo Pascal 7.0** in **File → New Project**, or open the **Pascal Forms** example. Pascal modules reuse the existing form designer, component catalog, source editor, debugger, MCP tools, browser exports, and independent Win32/macOS/Linux AOT backends. Existing projects remain Visual Basic by default, and modules can select their language explicitly.
+Choose **Turbo Pascal 7.0** in **File → New Project**, or open the **Turbo Pascal Forms** or **Turbo Pascal Number Lab** example. Number Lab is a complete two-unit application with input validation, Fibonacci and triangular calculations, shared form events, and text-file output. Pascal modules reuse the existing form designer, component catalog, source editor, debugger, MCP tools, browser exports, and independent Win32/macOS/Linux AOT backends. Existing projects remain Visual Basic by default, and modules can select their language explicitly.
 
 The JavaScript frontend includes typed Pascal parsing/lowering, units, arrays/records/sets, checked pointers, value objects and virtual methods, portable file codecs, source maps, and Pascal editor/debugger assistance. A standalone ESM/browser SDK and CLI are included. See [Turbo Pascal usage, compatibility boundaries, and native qualification](docs/TURBO-PASCAL.md) and the [compiler package](packages/turbo-pascal/README.md). Complete DOS/8086 behavior and Delphi compatibility are outside the current contract.
 

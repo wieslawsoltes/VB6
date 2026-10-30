@@ -10,6 +10,18 @@ Open **File → New Project**, select **Standard EXE**, choose **Turbo Pascal 7.
 
 The **Turbo Pascal Forms** example is also available in New Project. Its text box, greeting button, label, and `var KeyAscii` handler demonstrate the shared component model. The editable source project is [pascal-forms.vb6web](../examples/pascal-forms.vb6web).
 
+For a larger example, choose **Turbo Pascal Number Lab** in New Project or open
+[pascal-number-lab.vb6web](../examples/pascal-number-lab.vb6web). Enter a whole
+number from 0 to 40 and click **Calculate** or press Enter. `Form1` handles the
+controls and validation; the separate `NumberSeries` unit exports typed
+`Fibonacci` and `Triangular` functions. The upper bound keeps the calculation in
+the supported signed `LongInt` range. **Save results** writes all three displayed
+values to `Pascal-Results.txt`, checks `IOResult`, and closes the file. Browser
+execution uses the application's private virtual disk; native execution uses the
+process's current directory. The standalone build is
+`dist/examples/pascal-number-lab.html`. Source export includes both editable
+Pascal units and the form's designer metadata.
+
 ```pascal
 unit Form1;
 

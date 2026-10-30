@@ -2,12 +2,12 @@
   "version": 2,
   "files": {
     "dist/studio.js": {
-      "bytes": 23113219,
-      "sha256": "9110ebb08d3b95a63bdf68fcfa4e6c7a7a93328e58a9b031c4dcf842d6656a82"
+      "bytes": 23117534,
+      "sha256": "58a6f57c52875dcd61d253ff0ead8d1255a4f8c4ec70ad15698081f3db01b749"
     },
     "dist/VB6-Studio-Web.html": {
-      "bytes": 24146865,
-      "sha256": "2a62135b764ca3cb43bd24c93e8cb64723ae7e3ba195baa91beeab22a57b174a"
+      "bytes": 24151180,
+      "sha256": "caf743d643018b866fd406c45c20b4b9c8e4d7959ac87f4e66dd0ba97b94d576"
     },
     "dist/intelligent-ui-sandbox.html": {
       "bytes": 36292,
@@ -228,6 +228,10 @@
     "dist/examples/pascal-forms.html": {
       "bytes": 4031535,
       "sha256": "3fd572ad76c05322aba82011154a7f1db04ba1d2166f3b8fa60478b003dce21a"
+    },
+    "dist/examples/pascal-number-lab.html": {
+      "bytes": 4035747,
+      "sha256": "27967169ef893edd336b8557bc36bfbb2ce368edc7595a1de0a557ff64afb7aa"
     }
   }
 }
