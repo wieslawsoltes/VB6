@@ -45,7 +45,7 @@ export function createApplicationDesktop({document, container, project, launch, 
   const view = document.defaultView;
   const node = (tag, attrs = {}, ...children) => el(tag, {...attrs, document}, ...children);
   const button = (label, action, handler) => node('button', {type: 'button', 'data-desktop-action': action, onclick: handler}, label);
-  let host, disposed = false, loading = true, timer = null, directory = '/', releaseTheme = () => {};
+  let host, disposed = false, loading = true, timer = null, directory = '/', listingKey = null, releaseTheme = () => {};
   const subscriptions = [];
   const root = node('section', {id: 'vb6-desktop', 'data-vb-native': '', 'aria-label': 'Application desktop'});
   const state = node('span', {class: 'vb6-desktop-state', role: 'status', 'aria-live': 'polite'}, 'Starting application…');
@@ -95,7 +95,12 @@ export function createApplicationDesktop({document, container, project, launch, 
     path.textContent = directory;
     parent.disabled = directory === '/';
     all.disabled = fs.files.size === 0 && fs.directories.size <= 1;
-    const rows = applicationDiskEntries(fs, directory).map(entry => {
+    const entries = applicationDiskEntries(fs, directory), key = JSON.stringify([directory, entries]);
+    // A timer or any other form mutation may refresh the desktop status. Keep
+    // unchanged rows alive so these unrelated updates cannot steal focus or
+    // interrupt a pointer gesture on a file's Download button.
+    if (key === listingKey) return;
+    const rows = entries.map(entry => {
       const name = entry.folder ? button(entry.name, 'open-folder', () => { directory = entry.path; refreshFiles(); }) : node('span', {}, entry.name);
       const action = entry.folder ? node('span', {}, 'Folder') : button('Download', 'download-file', () => {
         perform(() => download(entry.name, host.fs.readBytes(entry.path), 'application/octet-stream', {document}));
@@ -105,6 +110,7 @@ export function createApplicationDesktop({document, container, project, launch, 
     });
     if (!rows.length) rows.push(node('tr', {}, node('td', {colspan: 3}, 'This folder is empty.')));
     listing.replaceChildren(...rows);
+    listingKey = key;
   }
   function refresh() {
     if (disposed) return;
