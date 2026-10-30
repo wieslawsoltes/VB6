@@ -7,7 +7,7 @@ export function startExportedApplication() {
   globalThis.vb6ApplicationStatus = status;
   const banner = document.getElementById('vb6-startup');
   const emit = (name, detail) => globalThis.dispatchEvent(new CustomEvent(name, {detail}));
-  let options, project, startupError, host, desktop, launching, departed = false, closed = false, rejectDeparture;
+  let options, project, startupError, host, desktop, launching, restartState, departed = false, closed = false, rejectDeparture;
   const abort = new AbortController();
   const departure = new Promise((resolve, reject) => { rejectDeparture = reject; });
   const cancelled = () => Object.assign(new Error('Application startup was cancelled because the page was closed.'), {name: 'AbortError', code: 'EXPORT_STARTUP_CANCELLED'});
@@ -56,18 +56,19 @@ export function startExportedApplication() {
   async function mount(sessionState) {
     ensureActive();
     startupError = null;
+    closed = false;
     status.phase = 'loading'; status.error = null;
     desktop?.setLoading(true);
     if (banner) { banner.hidden = false; banner.setAttribute('role', 'status'); banner.textContent = 'Starting application…'; }
     const next = await VB6Runtime.mountApplication(project, document.getElementById('app'), sessionState ? {...options, sessionState} : options);
     if (!next || typeof next !== 'object') throw new Error('The application runtime did not return a host.');
     host = next;
-    closed = false;
     globalThis.vb6Application = host;
     if (departed) { closeHost(); throw cancelled(); }
     desktop?.bind(host);
     // ApplicationHost may resolve with a failed VM. Never signal ready for it.
     if (host.vm?.state === 'error') throw Object.assign(new Error(startupError?.message || 'Visual Basic startup failed'), startupError);
+    restartState = undefined;
     status.phase = 'ready';
     if (banner) banner.hidden = true;
     emit('vb6:ready', {host});
@@ -80,10 +81,11 @@ export function startExportedApplication() {
     // Stop/dispose before capturing state: close any file handles, but retain
     // all bytes/settings even when persistence was denied or disabled.
     saveHost(); closeHost();
-    const sessionState = host?.fs ? {vfs: host.fs.snapshot(), settings: host.settings} : undefined;
-    // Keep the closed host as the last complete in-memory session until a new
-    // host is returned. A failed mount must not erase it before another retry.
-    launching = Promise.race([Promise.resolve().then(() => mount(sessionState)), departure]);
+    // Retain the last session across rejected mounts: there may be no new host
+    // to snapshot when the user retries, especially without browser storage.
+    if (host?.fs) restartState = {vfs: host.fs.snapshot(), settings: host.settings};
+    host = null;
+    launching = Promise.race([Promise.resolve().then(() => mount(restartState)), departure]);
     globalThis.vb6ApplicationReady = launching;
     launching.then(() => { launching = null; }, error => { launching = null; fail(error); });
     return launching;

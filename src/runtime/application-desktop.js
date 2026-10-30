@@ -45,7 +45,7 @@ export function createApplicationDesktop({document, container, project, launch, 
   const view = document.defaultView;
   const node = (tag, attrs = {}, ...children) => el(tag, {...attrs, document}, ...children);
   const button = (label, action, handler) => node('button', {type: 'button', 'data-desktop-action': action, onclick: handler}, label);
-  let host, disposed = false, loading = true, timer = null, directory = '/', releaseTheme = () => {};
+  let host, disposed = false, loading = true, timer = null, directory = '/', listingKey = null, releaseTheme = () => {};
   let pressedPointer = null, listingPending = false;
   const subscriptions = [];
   const root = node('section', {id: 'vb6-desktop', 'data-vb-native': '', 'aria-label': 'Application desktop'});
@@ -111,13 +111,15 @@ export function createApplicationDesktop({document, container, project, launch, 
     path.textContent = directory;
     parent.disabled = directory === '/';
     all.disabled = fs.files.size === 0 && fs.directories.size <= 1;
-    const entries = applicationDiskEntries(fs, directory);
+    const entries = applicationDiskEntries(fs, directory), key = JSON.stringify([directory, entries]);
+    // Timer-driven status updates leave an unchanged directory untouched.
+    if (key === listingKey) return;
     const keyFor = entry => (entry.folder ? 'folder:' : 'file:') + entry.path;
     const wanted = new Set(entries.map(keyFor));
     for (const [key, record] of rows) if (!wanted.has(key)) {
       record.row.remove(); rows.delete(key);
     }
-    if (!entries.length) { if (!emptyRow.isConnected) listing.append(emptyRow); return; }
+    if (!entries.length) { if (!emptyRow.isConnected) listing.append(emptyRow); listingKey = key; return; }
     emptyRow.remove();
     let cursor = listing.firstElementChild;
     for (const entry of entries) {
@@ -142,6 +144,7 @@ export function createApplicationDesktop({document, container, project, launch, 
       if (record.row !== cursor) listing.insertBefore(record.row, cursor);
       cursor = record.row.nextElementSibling;
     }
+    listingKey = key;
   }
   function refresh() {
     if (disposed) return;

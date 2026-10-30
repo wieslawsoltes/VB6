@@ -167,6 +167,23 @@ def deny_storage(page):
       configurable:true,get(){throw new DOMException('Storage denied by test policy','SecurityError');}
     });''')
 
+def desktop_focus(page):
+    page.evaluate('vb6Application.fs.write("/focus.txt","keep")')
+    page.locator('[data-desktop-action="files"]').click()
+    page.get_by_role('button', name='Download focus.txt', exact=True).focus()
+    page.evaluate('''()=>{
+      globalThis.focusedDownload=document.activeElement;
+      globalThis.clockTextBefore=document.querySelector('[data-control="lblTime"]').textContent;
+    }''')
+    wait_for_export(page, 'document.querySelector("[data-control=lblTime]").textContent!==clockTextBefore')
+    # Observe the scheduled desktop refresh after the actual timer update.
+    page.evaluate('()=>new Promise(resolve=>setTimeout(resolve,0))')
+    check(page.evaluate('focusedDownload.isConnected&&document.activeElement===focusedDownload'),
+          'A running timer destroyed keyboard focus in the unchanged private-disk listing')
+    with page.expect_download() as pending:
+        page.keyboard.press('Enter')
+    check(Path(pending.value.path()).read_bytes() == b'keep', 'Focused download did not retain its action')
+
 try:
     with sync_playwright() as p:
         launch = {'headless': True}
@@ -181,6 +198,7 @@ try:
             run_case(browser, origin + '-desktop-files-and-relaunch', REPORT / 'orders/index.html', origin, desktop_files)
             run_case(browser, origin + '-desktop-denied-storage', REPORT / 'desktop-persist/index.html', origin,
                      desktop_files, prepare=deny_storage)
+            run_case(browser, origin + '-desktop-timer-preserves-focus', REPORT / 'clock/index.html', origin, desktop_focus)
             run_case(browser, origin + '-gallery', REPORT / 'gallery/index.html', origin,
                      lambda page: check(page.evaluate('vb6Application.forms[0].controls.length >= 40'), 'Control gallery missing controls'))
             def adapter(page):

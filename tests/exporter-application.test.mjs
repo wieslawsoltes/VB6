@@ -273,6 +273,32 @@ test('departure during relaunch disposes the late host without disposing the clo
   assert.equal(env.events.filter(event=>event.type==='vb6:ready').length,1);
 });
 
+for (const persist of [false, true]) test(`a failed relaunch retains private bytes and settings for retry (persist=${persist})`, async () => {
+  const disk=new VirtualFileSystem();disk.writeBytes('/important.bin',[0,255,129]);
+  const attempts=[];let disposed=0;
+  const first={vm:{state:'stopped'},fs:disk,settings:{counter:7},
+    persist(){throw Error('storage denied');},dispose(){disposed++;this.disposed=true;}};
+  const next={vm:{state:'running'},fs:disk,settings:{counter:7}};
+  const env=environment({canRelaunchApplication:()=>true,mountApplication:async(p,c,o)=>{
+    attempts.push(o);
+    if(attempts.length===1)return first;
+    if(attempts.length===2)throw Error('temporary startup failure');
+    return next;
+  }});
+  env.nodes['vb6-options'].textContent=JSON.stringify({persist});
+  await env.start();
+  await assert.rejects(env.context.vb6RestartApplication(),/temporary startup failure/);
+  assert.equal(env.context.vb6ApplicationStatus.phase,'error');
+  assert.equal(await env.context.vb6RestartApplication(),next);
+  assert.equal(disposed,1);assert.equal(attempts.length,3);
+  for(const attempt of attempts.slice(1)) {
+    assert.deepEqual(attempt.sessionState.vfs,disk.snapshot());
+    assert.deepEqual(attempt.sessionState.settings,{counter:7});
+  }
+  assert.equal(env.events.filter(event=>event.type==='vb6:ready').length,2);
+  assert.equal(env.context.vb6ApplicationStatus.phase,'ready');
+});
+
 test('the export desktop is opt-out and never injected into the authenticated IDE debug frame', async () => {
   for(const options of [{desktop:false},{bridgeToken:'ide-token'}]) {
     let desktops=0;
