@@ -62,3 +62,16 @@ for(const optimization of [0,1,2]){
     assert.deepEqual(dc.origin,[3,5]);assert.deepEqual(dc.clip,[1,2,38,18]);
   });
 }
+
+
+test('real Windows pixel acceptance fixture is owned by the existing complete native matrix',async()=>{
+  const {nativeControlFixtures}=await import('../tools/win32-control-fixtures.mjs');
+  const fixture=nativeControlFixtures().find(f=>f.project.name==='AotControlBackgroundPixels');
+  assert.equal(fixture.checks.length,12);
+  for(const optimization of [0,1,2]){
+    const {bytes,report}=compileWin32(fixture.project,{optimization});
+    assert.ok(bytes.length<100*1024);
+    assert.equal(report.extraction,false);
+    for(const symbol of ['GetPixel','GetGuiResources','MapWindowPoints','OffsetViewportOrgEx'])assert.ok(report.imports.some(i=>i.symbol===symbol),symbol);
+  }
+});
