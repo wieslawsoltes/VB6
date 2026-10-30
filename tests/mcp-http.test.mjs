@@ -129,6 +129,56 @@ for (const era of ['modern','legacy']) test('MCP bridge: desktop stdio relay rea
   const transport = new NodeStdioTransport({command: process.execPath, args: [path.resolve('tools/mcp-stdio.mjs'), '--url', bridge.url + '/mcp'], env: {VB6_MCP_TOKEN: bridge.clientToken}}), client = new McpClient(transport, {era});
   t.after(async () => { await client.close(); await browser.close(); server.close(); await bridge.close(); }); await browser.connect(); await client.connect(); assert.equal((await client.callTool('echo', {text: 'desktop'})).structuredContent.text, 'desktop');
 });
+test('MCP stdio: legacy initialization delivery precedes pipelined requests', async t => {
+  let initialized = false;
+  const methods = [], url = await fixture(t, async (req, res) => {
+    if (req.method === 'GET') { res.writeHead(405); res.end(); return; }
+    if (req.method === 'DELETE') { res.end(); return; }
+    const message = await read(req); methods.push(message.method);
+    if (message.method === 'initialize') return json(res, {jsonrpc: '2.0', id: message.id, result: {protocolVersion: '2025-11-25', capabilities: {tools: {}}, serverInfo: info}}, 200, {'MCP-Session-Id': 'ordered-session'});
+    if (message.method === 'notifications/initialized') {
+      // The stdio writer acknowledges bytes before this HTTP exchange finishes.
+      // Independent HTTP connections must not overtake this lifecycle message.
+      await new Promise(resolve => setTimeout(resolve, 75)); initialized = true;
+      res.writeHead(202); res.end(); return;
+    }
+    if (!initialized) return json(res, {jsonrpc: '2.0', id: message.id, error: {code: -32000, message: 'Initialize the MCP session first.'}});
+    json(res, {jsonrpc: '2.0', id: message.id, result: {tools}});
+  });
+  const transport = new NodeStdioTransport({command: process.execPath, args: [path.resolve('tools/mcp-stdio.mjs'), '--url', url], env: {VB6_MCP_TOKEN: 'test-client-token'}});
+  const client = new McpClient(transport, {era: 'legacy'}); t.after(() => client.close());
+  await client.connect(); assert.equal((await client.listTools()).length, 1);
+  assert.deepEqual(methods, ['initialize', 'notifications/initialized', 'tools/list']);
+});
+test('MCP stdio: initialization waits stay cancellable and ordinary requests remain concurrent', async t => {
+  const entered = Promise.withResolvers(), release = Promise.withResolvers(), pings = new Map(); let toolCalls = 0;
+  t.after(() => release.resolve());
+  const url = await fixture(t, async (req, res) => {
+    if (req.method === 'GET') { res.writeHead(405); res.end(); return; }
+    if (req.method === 'DELETE') { res.end(); return; }
+    const message = await read(req);
+    if (message.method === 'initialize') return json(res, {jsonrpc: '2.0', id: message.id, result: {protocolVersion: '2025-11-25', capabilities: {}, serverInfo: info}}, 200, {'MCP-Session-Id': 'cancellable-session'});
+    if (message.method === 'notifications/initialized') { entered.resolve(); await release.promise; res.writeHead(202); res.end(); return; }
+    if (message.method === 'notifications/cancelled') { res.writeHead(202); res.end(); return; }
+    if (message.method === 'tools/list') { toolCalls++; return json(res, {jsonrpc: '2.0', id: message.id, result: {tools}}); }
+    if (message.method === 'ping') {
+      pings.set(message.params.label, {res, id: message.id});
+      // Neither request can finish until both have reached the server.
+      if (pings.size === 2) for (const [label, pending] of pings) json(pending.res, {jsonrpc: '2.0', id: pending.id, result: {label}});
+    }
+  });
+  const transport = new NodeStdioTransport({command: process.execPath, args: [path.resolve('tools/mcp-stdio.mjs'), '--url', url], env: {VB6_MCP_TOKEN: 'test-client-token'}});
+  const client = new McpClient(transport, {era: 'legacy'}); t.after(() => client.close());
+  await client.connect(); await entered.promise;
+  const pending = transport.exchange({jsonrpc: '2.0', id: 'queued', method: 'tools/list', params: {}}, {signal: AbortSignal.timeout(5000)});
+  await transport.exchange({jsonrpc: '2.0', method: 'notifications/cancelled', params: {requestId: 'queued'}});
+  assert.equal((await pending).error?.code, -32800);
+  assert.equal(toolCalls, 0);
+  release.resolve();
+  const replies = await Promise.all(['first', 'second'].map(label => client.request('ping', {label}, {timeout: 5000})));
+  assert.deepEqual(replies, [{label: 'first'}, {label: 'second'}]);
+  assert.equal(toolCalls, 0);
+});
 test('MCP stdio: companion credentials are excluded from inherited process environments', async t => {
   const previousOwner = process.env.VB6_MCP_OWNER_TOKEN, previousClient = process.env.VB6_MCP_TOKEN;
   process.env.VB6_MCP_OWNER_TOKEN = 'parent-owner-secret'; process.env.VB6_MCP_TOKEN = 'parent-client-secret';

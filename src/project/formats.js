@@ -1,3 +1,4 @@
+import {tokenizePascal} from '../language/pascal/lexer.js';
 import {formWithSavedTabs} from '../controls/tab-model.js';
 import {isWebBrowser} from '../controls/webbrowser-contract.js';
 import {layoutSidecarPath,encodeLayoutSidecar,stripLayoutDesignerProperties} from '../layout/project-sidecar.js';
@@ -12,6 +13,8 @@ import {newId,createForm,newProject,normalizeProject,CONTROL_DEFAULTS,BASIC_CONT
 import {VBError} from '../language/lexer.js';
 import {decodeANSI,encodeANSI} from '../runtime/binary-codec.js';
 import {cleanProjectPath,relativeProjectPath,resolveProjectPath,hydrateResources,prepareResources,toBase64} from './frx.js';
+import {fromBase64} from './frx.js';
+import {moduleLanguage,moduleSourcePath} from './language.js';
 export function parseVBValue(value){
   let quoted=false;for(let i=0;i<value.length;i++){if(value[i]==='"'){if(quoted&&value[i+1]==='"'){i++;continue;}quoted=!quoted;}else if(value[i]==="'"&&!quoted){value=value.slice(0,i);break;}}
   value=value.trim();const match=value.match(/^(\$?)"((?:[^"]|"")*)"(.*)$/);if(match){const name=match[2].replace(/""/g,'"'),tail=match[3].trim();return tail?{resource:name,offset:tail.replace(/^:\s*/,''),...(match[1]?{text:true}:{})}:name;}
@@ -48,7 +51,7 @@ export function serializeFRM(module,strict=false){
     const belongs=c=>{const parent=c.parent||null;if(parent!==(node===form?null:node.name))return false;const old=[...form.controls,...form.menus].find(p=>p.id===c.nativeParentId);return !old||old.name!==parent||old===node;};for(const c of form.controls.filter(belongs))write(c,depth+1);for(const c of form.menus.filter(belongs))write(c,depth+1);lines.push(indent+'End');
   };write(form,0);lines.push(serializeNativeCode(module,['Attribute VB_GlobalNameSpace = False','Attribute VB_Creatable = False','Attribute VB_PredeclaredId = True','Attribute VB_Exposed = False'],strict));return lines.join('\r\n')+'\r\n';
 }
-export function parseCodeModule(text,fileName){const name=text.match(/^\s*Attribute\s+VB_Name\s*=\s*"([^"]+)"/im)?.[1]||fileName.split(/[\\/]/).at(-1).replace(/\.(bas|cls|dsr)$/i,''),kind=/\.cls$/i.test(fileName)?'class':'module';let code=text.replace(/\r\n?/g,'\n'),nativeClassHeader;
+export function parseCodeModule(text,fileName){if(/\.(pas|pp)$/i.test(fileName)){const tokens=tokenizePascal(String(text),{tolerant:true}),name=['unit','program'].includes(tokens[0]?.lower)&&tokens[1]?.type==='id'?tokens[1].value:fileName.split(/[\\/]/).at(-1).replace(/\.(pas|pp)$/i,'');return {id:newId(),name,kind:'module',language:'pascal',code:String(text).replace(/\r\n?/g,'\n'),sourcePath:cleanProjectPath(fileName)};}const name=text.match(/^\s*Attribute\s+VB_Name\s*=\s*"([^"]+)"/im)?.[1]||fileName.split(/[\\/]/).at(-1).replace(/\.(bas|cls|dsr)$/i,''),kind=/\.cls$/i.test(fileName)?'class':'module';let code=text.replace(/\r\n?/g,'\n'),nativeClassHeader;
   if(kind==='class'){const wrapper=code.match(/^VERSION[^\n]*\nBEGIN[\s\S]*?^END\s*\n/im);if(wrapper){nativeClassHeader=wrapper[0].trim();code=code.replace(wrapper[0],'');}}
   return {id:newId(),name,kind,...splitAttributes(code.split('\n')),sourcePath:cleanProjectPath(fileName),...(nativeClassHeader?{nativeClassHeader}:{})};
 }
@@ -57,10 +60,12 @@ function modulePath(m){return m.sourcePath||m.name+(m.kind==='form'?'.frm':m.kin
 function serializeVBPBase(project){const native=project.nativeProject||{},owner=native.path||project.name+'.vbp',raw=(native.entries||[]).filter(e=>!project.resources||e.key.toLowerCase()!=='resfile32'),lines=raw.length?raw.map(e=>e.key+'='+e.value):['Type=Exe','MajorVer=0','MinorVer=2','RevisionVer=0','AutoIncrementVer=0'];for(const m of project.modules){const path=nativePathValue(relativeProjectPath(owner,modulePath(m)));{const kind=m.nativeKind||(m.kind==='form'?'Form':m.kind==='class'?'Class':'Module');lines.push(`${kind}=${['Module','Class'].includes(kind)?m.name+'; ':''}${path}`);};}for(const path of native.relatedDocuments||[])lines.push('RelatedDoc='+nativePathValue(relativeProjectPath(owner,path)));if(project.resources)lines.push('ResFile32="'+relativeProjectPath(owner,project.resources.fileName)+'"');for(const r of project.references||[])lines.push(`${r.kind}=${r.value}`);if(project.modules.some(m=>m.form?.controls.some(c=>isWebBrowser(c.type)))&&!lines.some(line=>/^Object\s*=.*EAB22AC0-30C1-11CF-A7EB-0000C05BAE0B/i.test(line)))lines.push('Object={EAB22AC0-30C1-11CF-A7EB-0000C05BAE0B}#1.1#0; ieframe.dll');if(project.modules.some(m=>m.form?.controls.some(c=>c.type==='SSTab'))&&!lines.some(line=>/^Object\s*=.*BDC217C8-ED16-11CD-956C-0000C04E4C0A/i.test(line)))lines.push('Object={BDC217C8-ED16-11CD-956C-0000C04E4C0A}#1.1#0; TABCTL32.OCX');if(project.description&&!raw.some(e=>e.key.toLowerCase()==='description'))lines.push('Description='+quote(project.description));lines.push('Startup='+quote(project.startup),'Name='+quote(project.name));if(!raw.some(e=>e.key.toLowerCase()==='title'))lines.push('Title='+quote(project.name));return lines.join('\r\n')+'\r\n';}
 export function serializeVBP(project){validateNativeMetadata(project);return patchNativeProject(project,serializeVBPBase(project));}
 export function canonicalSource(m,strict=false){
+  if(moduleLanguage(m)==='pascal')return String(m.code||'');
   if(m.kind==='form')return serializeFRM(m,strict);
   return (m.kind==='class'?(m.nativeClassHeader||'VERSION 1.0 CLASS\nBEGIN\n  MultiUse = -1\nEND').replace(/\r\n?/g,'\n').replace(/\n/g,'\r\n')+'\r\n':'')+serializeNativeCode(m,[],strict)+'\r\n';
 }
 function singleSourceFiles(project,options={}){
+  if(project.modules.some(m=>moduleLanguage(m,project)==='pascal'))return languageSourceFiles(project,options);
   const prepared=prepareResources(project),files=Object.assign(Object.create(null),prepared.files),seen=new Set(Object.keys(files).map(p=>p.toLowerCase()));
   const put=(path,value)=>{path=cleanProjectPath(path);const key=path.toLowerCase();if(seen.has(key))throw new VBError('Native output path collision: '+path,1002);seen.add(key);files[path]=value;};
   const owner=project.nativeProject?.path||project.name+'.vbp';
@@ -72,6 +77,23 @@ function singleSourceFiles(project,options={}){
   for(const m of prepared.modules){for(const node of m.form?[m.form,...m.form.controls,...m.form.menus]:[])for(const [key,value]of Object.entries(node.properties||{}))if(value&&typeof value==='object'&&!value.resource&&Object.keys(value).length)throw new VBError('Native export cannot encode structured property '+node.name+'.'+key+'. Save as a browser project to retain this data.',1002);const source=patchNativeSource(m,canonicalSource(m,!m.nativeSource),parseVBValue);put(modulePath(m),encodeNativeText(source,m.nativeSource||{encoding:m.sourceEncoding||'windows-1252',bom:false},options.encoding));}
   if(project.nativeWindowState){const path=nativeWindowStatePath(project);if(!/\.vbw$/i.test(path))throw new Error('Invalid VBW companion path');const existing=Object.keys(files).find(p=>p.toLowerCase()===path.toLowerCase());files[existing||path]=serializeVBW(project);}
   return files;
+}
+/** A mixed-language source bundle retains the complete designer and source
+ * metadata. Pascal units never receive Visual Basic headers or VBP membership. */
+function languageSourceFiles(project,options){
+  const snapshot=normalizeProject(project),files=Object.create(null),seen=new Set();
+  const put=(path,value)=>{path=cleanProjectPath(path);if(seen.has(path.toLowerCase()))throw new VBError('Source output path collision: '+path,1002);seen.add(path.toLowerCase());files[path]=value;};
+  for(const [path,asset]of Object.entries(snapshot.assets||{}))put(path,asset?.encoding==='base64'?fromBase64(asset.data):asset);
+  for(const module of snapshot.modules){
+    module.language=moduleLanguage(module,snapshot);module.sourcePath=moduleSourcePath(module,snapshot);
+    if(module.language==='pascal'){
+      if(!/\.(pas|pp)$/i.test(module.sourcePath))throw new VBError('Pascal source requires a .pas or .pp path: '+module.sourcePath,1002);
+      put(module.sourcePath,module.code);
+      if(module.form)put(module.sourcePath+'.form.json',JSON.stringify({schema:1,language:'pascal',name:module.name,kind:module.kind,form:module.form},null,2));
+    }else put(module.sourcePath,encodeNativeText(canonicalSource(module),module.nativeSource||{encoding:module.sourceEncoding||'windows-1252',bom:false},options.encoding));
+  }
+  snapshot.sourceBundleVersion=1;
+  put(snapshot.name+'.vb6web',JSON.stringify(snapshot,null,2));return files;
 }
 export function sourceFiles(project,options={}){const files=project.nativeWorkspace?workspaceFiles(project,options,singleSourceFiles):singleSourceFiles(project,options);normalizedEntries(Object.entries(files));return files;}
 export async function importFiles(entries,options={}){return importNativeFiles(entries,options,{parseFRM,parseCodeModule,canonicalSource});}

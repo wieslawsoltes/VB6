@@ -15,7 +15,7 @@ export function installAdvancedEditor(ide) {
   controller.report=error=>{ide.status('Advanced editor: '+(error.message||error));};
   controller.configure=async(value,{persist=true}={})=>{
     const settings=normalizeAdvancedEditorSettings(value);
-    for(const name of ['vb6Endpoint','xamlEndpoint'])settings[name]=validateLanguageServerEndpoint(settings[name],view.location.protocol);
+    for(const name of ['vb6Endpoint','pascalEndpoint','xamlEndpoint'])settings[name]=validateLanguageServerEndpoint(settings[name],view.location.protocol);
     const generation=++controller.generation;
     controller.initializing?.abort();controller.initializing=null;
     controller.settings=settings;
@@ -30,7 +30,7 @@ export function installAdvancedEditor(ide) {
       const runtime=await assets.create(ide,settings,assets,{signal:initializing.signal});
       if(generation!==controller.generation){runtime.dispose();return false;}
       controller.runtime=runtime;ide.root.dataset.advancedEditor='true';
-      ide.status('Advanced VB6/XAML editor enabled.');return true;
+      ide.status('Advanced Visual Basic/Pascal/XAML editor enabled.');return true;
     }catch(error){if(generation!==controller.generation)return false;controller.report(error);ide.root.dataset.advancedEditor='false';throw error;}
     finally{if(controller.initializing===initializing)controller.initializing=null;}
   };
@@ -41,8 +41,8 @@ export function installAdvancedEditor(ide) {
     body.append(el('p',{},'Classic mode is the default. The advanced editor is loaded only after enabling it.'));
     for(const [key,label]of [['minimap','Minimap'],['stickyScroll','Sticky scope headers'],['wordWrap','Word wrap'],['ligatures','Font ligatures'],['semanticHighlighting','Semantic highlighting'],['inlayHints','Parameter name hints'],['codeLens','Reference CodeLens'],['inlineValues','Paused-frame inline values (storage only)']])checkbox(key,label);
     const whitespace=el('select',{'aria-label':'Render whitespace'});for(const value of ['none','boundary','selection','trailing','all'])whitespace.append(el('option',{value},value));whitespace.value=settings.renderWhitespace;fields.renderWhitespace=whitespace;body.append(el('label',{},'Render whitespace ',whitespace));
-    body.append(el('hr'),el('p',{},'Language servers: leave blank to use the bundled VB6 and XAML services locally in a worker. Configured servers receive project source. Connect only to servers you trust.'));
-    for(const [key,label]of [['vb6Endpoint','VB6 language server WebSocket URL'],['xamlEndpoint','XAML language server WebSocket URL']]){
+    body.append(el('hr'),el('p',{},'Language servers: leave blank to use the bundled Visual Basic, Pascal and XAML services locally in a worker. Configured servers receive project source. Connect only to servers you trust.'));
+    for(const [key,label]of [['vb6Endpoint','VB6 language server WebSocket URL'],['pascalEndpoint','Pascal language server WebSocket URL'],['xamlEndpoint','XAML language server WebSocket URL']]){
       const input=el('input',{type:'url',value:settings[key],placeholder:'Built-in (no network)','aria-label':label,style:{width:'100%',boxSizing:'border-box'}});fields[key]=input;body.append(el('label',{},label,input));
     }
     const read=()=>Object.fromEntries(Object.entries(fields).map(([key,input])=>[key,input.type==='checkbox'?input.checked:input.value]));

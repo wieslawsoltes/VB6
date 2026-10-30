@@ -10,6 +10,7 @@ import {cleanProjectPath,relativeProjectPath,resolveProjectPath,hydrateResources
 import {decodeNativeText,encodeNativeText,bytesOf,equalBytes,linesOf,lineBody,lineEnding,preferredEOL,unquote,quote,nativePathValue,commentAt,replaceLineValue} from './native-text.js';
 import {rememberNativeSource,nativeTree} from './native-source.js';
 import {VBError} from '../language/lexer.js';
+import {moduleLanguage,moduleSourcePath} from './language.js';
 export const MAX_NATIVE_FILES=2000;
 export const MAX_NATIVE_BYTES=50*1024*1024;
 export const MAX_NATIVE_PROJECTS=32;
@@ -17,9 +18,9 @@ const fail=message=>{throw new VBError('Project: '+message,1002);};
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 const memberKinds={form:'form',module:'module',class:'class',usercontrol:'form',propertypage:'form',userdocument:'form',designer:'class',relateddoc:'related'};
 const nativeNames={form:'Form',module:'Module',class:'Class',usercontrol:'UserControl',propertypage:'PropertyPage',userdocument:'UserDocument',designer:'Designer',relateddoc:'RelatedDoc'};
-const sourcePattern=/\.(frm|bas|cls|ctl|pag|dob|dsr)$/i;
+const sourcePattern=/\.(frm|bas|cls|ctl|pag|dob|dsr|pas|pp)$/i;
 const cleanValue=value=>{const at=commentAt(value,true);return (at<0?value:value.slice(0,at)).trim();};
-const modulePath=m=>m.sourcePath||m.name+(m.kind==='form'?'.frm':m.kind==='class'?'.cls':'.bas');
+const modulePath=m=>moduleSourcePath(m);
 function record(line,index){const body=lineBody(line),m=body.match(/^\s*([^=]+?)\s*=\s*(.*)$/);return m?{index,key:m[1].trim(),value:cleanValue(m[2]),rawValue:m[2]}:null;}
 function mainRecords(text){const records=[];for(const [index,line]of linesOf(text).entries()){if(/^\s*\[/.test(line))break;const item=record(line,index);if(item&&!/^\s*[';]/.test(line))records.push(item);}if(records.length>10000)fail('Native project metadata exceeds 10,000 records');return records;}
 function splitMember(value){let quoted=false;for(let i=0;i<value.length;i++){if(value[i]==='"'){if(quoted&&value[i+1]==='"'){i++;continue;}quoted=!quoted;}if(value[i]===';'&&!quoted)return {name:unquote(value.slice(0,i)),path:unquote(value.slice(i+1))};}return {path:unquote(value)};}
@@ -84,17 +85,22 @@ function singleProject(entries,path,options,api,diagnostics){
         const tree=nativeTree(doc.text),body=tree.root?tree.tail:doc.text;module=api.parseCodeModule(body,item.path);module.kind='class';module.nativeOpaque=true;
         diagnostics.push({severity:'warning',source:item.path,message:'Custom designer preserved byte-for-byte; its designer host is not available in the browser.'});
       }else module=api.parseCodeModule(doc.text,item.path);
+      if(moduleLanguage(module)==='pascal'){
+        const companion=[...entries.keys()].find(name=>name.toLowerCase()===(item.path+'.form.json').toLowerCase());
+        if(companion){const value=JSON.parse(readDocument(entries.get(companion),options).text);if(value.schema!==1||value.language!=='pascal'||value.name!==module.name||!value.form)throw new Error('Invalid Pascal form companion: '+companion);module.kind='form';module.form=value.form;consumed.add(companion);}
+      }
     normalizeProject({...project,modules:[module]});
     }catch(error){if(!native)fail('Cannot open '+item.path+': '+error.message);item.saved.opaqueReason=error.message;diagnostics.push({severity:'error',source:item.path,message:'Source retained unchanged as a read-only native file: '+error.message});continue;}
     module.sourcePath=item.path;module.sourceEncoding=doc.encoding;module.resourceEncoding=codePage(options);if(item.file.nativeKind)module.nativeKind=item.file.nativeKind;
     item.saved.moduleId=module.id;project.modules.push(module);consumed.add(item.path);
-    const canonical=module.nativeOpaque?doc.text:api.canonicalSource(module);rememberNativeSource(module,doc,canonical);
+    const canonical=module.nativeOpaque?doc.text:api.canonicalSource(module);if(moduleLanguage(module)!=='pascal')rememberNativeSource(module,doc,canonical);
     if(/\.(ctl|pag|dob)$/i.test(item.path))diagnostics.push({severity:'warning',source:module.name,message:'Native '+(module.nativeKind||module.form.type)+' source and designer data are editable/preserved; original COM designer behavior is not provided.'});
     if(item.file.name&&item.file.name.toLowerCase()!==module.name.toLowerCase())diagnostics.push({severity:'warning',source:project.name,message:'Project alias '+item.file.name+' differs from Attribute VB_Name '+module.name+'; original entry retained until renamed.'});
   }
   if(native)for(const file of native.files)if(file.resolved&&!file.moduleId&&file.kind!=='related')file.moduleId=project.modules.find(m=>m.sourcePath===file.resolved)?.id||null;
   if(!project.modules.length&&!meta)fail('No .vb6web project or referenced native source files found. Select the project and its companion files together.');
   project.startup=meta?.startup||project.modules.find(m=>m.form)?.name||'Sub Main';
+  if(project.modules.length&&project.modules.every(m=>moduleLanguage(m)==='pascal'))project.language='pascal';
   const res=meta?.rawEntries.find(r=>r.key.toLowerCase()==='resfile32');
   if(res){const ref=unquote(res.value),resolved=resolve(entries,path,ref,diagnostics,{fallback:options.basenameFallback!==false});if(!resolved)diagnostics.push({severity:'error',source:project.name,message:'Missing referenced resource file: '+ref});else{try{project.resources=readRES(bytesOf(entries.get(resolved)),resolved);native.resourcePath=resolved;native.resourceRelocated=exactPath(entries,path,ref)!==resolved;consumed.add(resolved);}catch(error){diagnostics.push({severity:'warning',source:resolved,message:'Resource file retained without decoding: '+error.message});}}}
   if(path){const sidecar=[...entries.keys()].find(name=>name.toLowerCase()===dataSidecarPath(path).toLowerCase());if(sidecar){Object.assign(project,decodeDataSidecar(bytesOf(entries.get(sidecar))));consumed.add(sidecar);diagnostics.push({severity:'info',source:sidecar,message:'Loaded portable browser data definitions and virtual data files. These are not a native VB6 Data Environment designer.'});}}
@@ -119,7 +125,17 @@ export async function importNativeFiles(input,options,api){
     if(!selected){for(const candidate of choices.filter(c=>/\.json$/i.test(c.path))){try{const parsed=JSON.parse(readDocument(entries.get(candidate.path),options).text);if(parsed?.schema===1&&Array.isArray(parsed.modules)){selected=candidate.path;break;}}catch{}}}
   }
   if(selected&&/\.(vb6web|vb6proj|json)$/i.test(selected)){
-    const project=normalizeProject(JSON.parse(readDocument(entries.get(selected),options).text));validateWorkspace(project);project.storageFormat='web';return {project,diagnostics,format:'web',entryPath:selected};
+    let project=normalizeProject(JSON.parse(readDocument(entries.get(selected),options).text));
+    if(project.sourceBundleVersion===1){
+      for(const module of project.modules){
+        if(moduleLanguage(module,project)!=='pascal'||!module.sourcePath)continue;
+        const path=resolve(entries,selected,module.sourcePath,diagnostics,{fallback:false});if(path)module.code=readDocument(entries.get(path),options).text.replace(/\r\n?/g,'\n');
+        const companion=path&&[...entries.keys()].find(name=>name.toLowerCase()===(path+'.form.json').toLowerCase());
+        if(companion){const value=JSON.parse(readDocument(entries.get(companion),options).text);if(value.schema!==1||value.language!=='pascal'||value.name!==module.name||!value.form)fail('Invalid Pascal form companion: '+companion);module.kind='form';module.form=value.form;}
+      }
+      project=normalizeProject(project);
+    }
+    validateWorkspace(project);project.storageFormat='web';return {project,diagnostics,format:'web',entryPath:selected};
   }
   if(selected&&/\.vbg$/i.test(selected)){
     const document=readDocument(entries.get(selected),options),group=parseVBG(document.text);if(group.projects.length>MAX_NATIVE_PROJECTS)fail('Project group exceeds 32 projects');
