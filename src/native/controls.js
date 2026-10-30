@@ -7,6 +7,7 @@ import {nativeImageListMethods} from './control-imagelist.js';
 import {nativePictureMethods} from './control-pictures.js';
 import {nativeDialogMethods} from './control-dialogs.js';
 import {nativeSelectionFormatMethods} from './control-format.js';
+import {loadNativeControlLibrary} from './control-library.js';
 /** Native HWND lowering. Runtime instructions are emitted per used control family;
  * this module itself is compiler code and is never embedded in a PE32 image. */
 import {NATIVE_CONTROL_CATALOG,nativeControlDependencies} from './control-catalog.js';
@@ -69,9 +70,7 @@ export const nativeControlMethods={
     let mask=deps.commonControls;if(controls.some(c=>c.tooltip))mask|=4;
     this.nativeControlDependencies={commonControls:mask,libraries:[...deps.libraries]};
     if(mask){const label='native:common-controls';this.ro.align(4).label(label).u32(8).u32(mask);this.x.api('comctl32.dll','InitCommonControlsEx',[label]).test().branch('e','error:7');}
-    // Restrict the search to System32. No project path or current-directory DLL
-    // can substitute for the operating system's RichEdit implementation.
-    for(const library of deps.libraries)this.x.api('kernel32.dll','LoadLibraryExW',[this.string(library),0,0x800]).test().branch('e','error:7');
+    for(const library of deps.libraries)loadNativeControlLibrary(this,library);
   },
   createNativeControls(module){
     const x=this.x;let order;
