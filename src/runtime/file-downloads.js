@@ -9,8 +9,12 @@ export function queueFileDownload(vm,name,sourceName=''){
   const fs=vm.fs,path=fs.canonical(name),owner=vm.stack?.[0];
   const source=sourceName&&fs.exists(sourceName)?fs.readBytes(sourceName):null;
   const before=fs.metadata.get(path),previous=fs.exists(path)?fs.readBytes(path):null;
-  const request={name,path,source,previous,before};
+  const request={name,path,source,previous,before,errorAtSelection:vm.lastError};
   const download=()=>{
+    // Err.Number is sticky and can describe an unrelated earlier operation.
+    // Conversely a GoTo handler clears Err when it returns. Compare the actual
+    // trapped error identity across this transaction rather than either value.
+    if(vm.lastError!==request.errorAtSelection)return;
     const changed=fs.metadata.get(path)!==request.before;
     const bytes=fs.exists(path)&&(changed||fs.canonical(sourceName)===path)?fs.readBytes(path):request.source??request.previous;
     // A dialog alone must never fabricate an empty document.
@@ -25,7 +29,7 @@ export function queueFileDownload(vm,name,sourceName=''){
     const offComplete=vm.on('procedureComplete',({frame,completed})=>{
       const saves=pending.get(frame);if(!saves)return;
       pending.delete(frame);if(!pending.size)clear();
-      if(!completed||vm.err.Number||vm.state==='stopped'||vm.state==='error')return;
+      if(!completed||vm.state==='stopped'||vm.state==='error')return;
       for(const finish of saves.values()){
         // Browser downloads are synchronous. Native desktop bridges may return
         // promises; report rejection instead of losing it as an unhandled task.

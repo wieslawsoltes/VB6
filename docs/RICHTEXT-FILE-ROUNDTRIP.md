@@ -50,7 +50,10 @@ when Save As selects a new name. Repeated saves to the same destination inside
 one handler produce its final bytes once. A selected name with no file produces
 no fabricated empty download; intentionally written zero-byte files still work.
 
-Cancelled and failed saves release pending transactions. The sample's error
+Cancelled and failed saves release pending transactions. Transactions compare
+the trapped-error identity from selection to completion: an unrelated old
+`Err.Number` cannot suppress a successful save, and a `GoTo` handler clearing
+`Err` cannot turn a failed save into a stale download. The sample's error
 handler reports cancellation without changing its document. Open continues to
 use the actual browser file chooser and imports the selected bytes before
 `LoadFile` executes. Renamed downloads reopen with formatting and Unicode intact.
@@ -61,8 +64,8 @@ changes the Save As filename, verifies exact downloaded bytes against the VFS,
 reopens the real download, overwrites the same name with new Unicode/formatted
 content, reopens again, and checks cancellation without downloads or new files.
 
-Local validation for this change: 135 focused Node tests passed, including all
-12 loader instruction cases and 11 file transaction cases; all eight RichText
-Chromium acceptance cases passed on Chromium 153.0.8010.12 with Playwright 1.57.
-The browser run used the suite's in-memory origin. Remote CI retains the normal
-browser-origin and Windows execution coverage.
+Local validation for this change: 137 focused Node tests passed, including all
+12 loader instruction cases and 13 file transaction cases. All eight RichText
+Chromium acceptance cases passed at each of the in-memory, HTTP and local file
+origins (24 cases total) on Chromium 153.0.8010.12 with Playwright 1.57. Remote CI
+retains its normal browser-engine and Windows execution coverage.

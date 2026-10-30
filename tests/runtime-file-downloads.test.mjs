@@ -63,6 +63,15 @@ test('handled write failures do not turn an old source into a successful save',a
   const {vm,saved}=setup(main('On Error Resume Next\nDialog1.ShowSave\nOpen "/missing/path.rtf" For Output As #1'));
   vm.fs.write('Document.rtf','old source');await vm.start();assert.equal(vm.err.Number,76);assert.deepEqual(saved,[]);
 });
+test('a stale handled error before ShowSave does not suppress a later successful download',async()=>{
+  const {vm,saved}=setup(main('On Error Resume Next\nError 5\n'+write));await vm.start();
+  assert.equal(vm.err.Number,5);assert.equal(text(saved[0].bytes),'New content\r\nSecond line\r\n');
+});
+test('GoTo error-handler cleanup cannot turn a failed save into a stale download',async()=>{
+  const {vm,saved}=setup(main('On Error GoTo Failed\nDialog1.ShowSave\nOpen "/missing/path.rtf" For Output As #1\nExit Sub\nFailed:\nDebug.Print Err.Number'));
+  vm.fs.write('Document.rtf','old source');await vm.start();
+  assert.equal(vm.err.Number,0,'VB clears Err on return from an active handler');assert.deepEqual(saved,[]);
+});
 test('cancel retains FileName and does not queue a download',async()=>{
   const {vm,control,saved}=setup(main('On Error Resume Next\nDialog1.ShowSave'),{name:''});await vm.start();
   assert.equal(vm.err.Number,32755);assert.equal(control.props.FileName,'Document.rtf');assert.deepEqual(saved,[]);assert.equal(vm.listenerCount('procedureComplete'),0);
