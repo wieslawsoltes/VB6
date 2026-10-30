@@ -46,6 +46,7 @@ export function createApplicationDesktop({document, container, project, launch, 
   const node = (tag, attrs = {}, ...children) => el(tag, {...attrs, document}, ...children);
   const button = (label, action, handler) => node('button', {type: 'button', 'data-desktop-action': action, onclick: handler}, label);
   let host, disposed = false, loading = true, timer = null, directory = '/', releaseTheme = () => {};
+  let pressedPointer = null, listingPending = false;
   const subscriptions = [];
   const root = node('section', {id: 'vb6-desktop', 'data-vb-native': '', 'aria-label': 'Application desktop'});
   const state = node('span', {class: 'vb6-desktop-state', role: 'status', 'aria-live': 'polite'}, 'Starting application…');
@@ -67,6 +68,18 @@ export function createApplicationDesktop({document, container, project, launch, 
     node('span', {class: 'vb6-desktop-title'}, project.name), state);
   const path = node('output', {'aria-label': 'Current folder', class: 'vb6-disk-path'}, '/');
   const listing = node('tbody');
+  const rows = new Map();
+  const emptyRow = node('tr', {}, node('td', {colspan: 3}, 'This folder is empty.'));
+  listing.addEventListener('pointerdown', event => {
+    if (event.button === 0 && event.isPrimary) pressedPointer = event.pointerId;
+  });
+  const finishPress = event => {
+    if (pressedPointer === null || event.type.startsWith('pointer') && event.pointerId !== pressedPointer) return;
+    pressedPointer = null;
+    if (listingPending) { listingPending = false; schedule(); }
+  };
+  const pressEndEvents = ['pointerup', 'pointercancel', 'blur', 'pagehide'];
+  for (const event of pressEndEvents) view.addEventListener(event, finishPress);
   const table = node('table', {class: 'vb6-disk-table'},
     node('thead', {}, node('tr', {}, node('th', {scope: 'col'}, 'Name'), node('th', {scope: 'col'}, 'Size'), node('th', {scope: 'col'}, 'Action'))), listing);
   const parent = button('Up', 'up', () => { directory = directory.slice(0, directory.lastIndexOf('/')) || '/'; refreshFiles(); });
@@ -89,22 +102,46 @@ export function createApplicationDesktop({document, container, project, launch, 
   }
   function refreshFiles() {
     if (disposed || !host?.fs) return;
+    // A new row can move an attached button away from the release position.
+    // Reconcile after the native click, while its action still reads live bytes.
+    if (pressedPointer !== null) { listingPending = true; return; }
     const fs = host.fs;
     if (!fs.directories.has(fs.canonical(directory))) directory = '/';
     directory = fs.canonical(directory);
     path.textContent = directory;
     parent.disabled = directory === '/';
     all.disabled = fs.files.size === 0 && fs.directories.size <= 1;
-    const rows = applicationDiskEntries(fs, directory).map(entry => {
-      const name = entry.folder ? button(entry.name, 'open-folder', () => { directory = entry.path; refreshFiles(); }) : node('span', {}, entry.name);
-      const action = entry.folder ? node('span', {}, 'Folder') : button('Download', 'download-file', () => {
-        perform(() => download(entry.name, host.fs.readBytes(entry.path), 'application/octet-stream', {document}));
-      });
-      if (!entry.folder) action.setAttribute('aria-label', 'Download ' + entry.name);
-      return node('tr', {'data-disk-path': entry.path}, node('td', {}, name), node('td', {}, entry.folder ? '—' : entry.bytes.toLocaleString() + ' bytes'), node('td', {}, action));
-    });
-    if (!rows.length) rows.push(node('tr', {}, node('td', {colspan: 3}, 'This folder is empty.')));
-    listing.replaceChildren(...rows);
+    const entries = applicationDiskEntries(fs, directory);
+    const keyFor = entry => (entry.folder ? 'folder:' : 'file:') + entry.path;
+    const wanted = new Set(entries.map(keyFor));
+    for (const [key, record] of rows) if (!wanted.has(key)) {
+      record.row.remove(); rows.delete(key);
+    }
+    if (!entries.length) { if (!emptyRow.isConnected) listing.append(emptyRow); return; }
+    emptyRow.remove();
+    let cursor = listing.firstElementChild;
+    for (const entry of entries) {
+      const key = keyFor(entry);
+      let record = rows.get(key);
+      if (!record) {
+        const name = entry.folder ? button(entry.name, 'open-folder', () => { directory = entry.path; refreshFiles(); }) : node('span', {}, entry.name);
+        const action = entry.folder ? node('span', {}, 'Folder') : button('Download', 'download-file', () => {
+          // Read current bytes at activation, including files replaced since
+          // the directory was listed. The row only owns the path identity.
+          perform(() => download(entry.name, host.fs.readBytes(entry.path), 'application/octet-stream', {document}));
+        });
+        if (!entry.folder) action.setAttribute('aria-label', 'Download ' + entry.name);
+        const size = node('td');
+        record = {row: node('tr', {'data-disk-path': entry.path}, node('td', {}, name), size, node('td', {}, action)), size};
+        rows.set(key, record);
+      }
+      const size = entry.folder ? '—' : entry.bytes.toLocaleString() + ' bytes';
+      if (record.size.textContent !== size) record.size.textContent = size;
+      // Keep attached controls stable through unrelated host repaints and file
+      // changes, so focus and a native press/release retain the same target.
+      if (record.row !== cursor) listing.insertBefore(record.row, cursor);
+      cursor = record.row.nextElementSibling;
+    }
   }
   function refresh() {
     if (disposed) return;
@@ -146,6 +183,7 @@ export function createApplicationDesktop({document, container, project, launch, 
     dispose() {
       if (disposed) return;
       disposed = true; unbind();
+      for (const event of pressEndEvents) view.removeEventListener(event, finishPress);
       if (timer !== null) view.clearTimeout(timer);
       if (dialog.open) dialog.close();
       root.remove(); document.documentElement.removeAttribute('data-vb-desktop');

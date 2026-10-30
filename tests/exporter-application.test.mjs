@@ -231,6 +231,48 @@ test('launching an application that still owns live forms never creates a second
   await env.start();assert.equal(await env.context.vb6RestartApplication(),host);assert.equal(mounts,1);assert.equal(disposed,0);
 });
 
+test('a failed relaunch retains memory-only files and settings for the next attempt', async () => {
+  const disk=new VirtualFileSystem();disk.makeDirectory('/Exports');disk.makeDirectory('/Exports/Empty');
+  disk.writeBytes('/Exports/kept.bin',[0,255,129]);
+  let mounts=0,disposals=0;
+  const first={vm:{state:'stopped'},fs:disk,settings:{counter:7},dispose(){disposals++;this.disposed=true;}};
+  const env=environment({canRelaunchApplication:()=>true,mountApplication:async(_project,_container,options)=>{
+    mounts++;
+    if(mounts===1)return first;
+    if(mounts===2)throw new Error('Temporary mount failure');
+    return {vm:{state:'idle'},fs:new VirtualFileSystem(options.sessionState?.vfs),settings:structuredClone(options.sessionState?.settings||{})};
+  }});
+  await env.start();
+  await assert.rejects(env.context.vb6RestartApplication(),/Temporary mount failure/);
+  assert.equal(env.context.vb6ApplicationStatus.phase,'error');
+  assert.equal(env.context.vb6Application,first,'the closed host keeps the private disk accessible after a failed launch');
+  const next=await env.context.vb6RestartApplication();
+  assert.deepEqual(next.fs.readBytes('/Exports/kept.bin'),new Uint8Array([0,255,129]));
+  assert.ok(next.fs.directories.has('/Exports/Empty'));
+  assert.deepEqual(next.settings,{counter:7});
+  assert.equal(disposals,1);assert.equal(mounts,3);
+  assert.equal(env.context.vb6ApplicationStatus.phase,'ready');
+});
+
+test('departure during relaunch disposes the late host without disposing the closed host again', async () => {
+  let mounts=0,finish,firstDisposals=0,lateDisposals=0;
+  const first={vm:{state:'stopped'},fs:new VirtualFileSystem(),settings:{},dispose(){firstDisposals++;this.disposed=true;}};
+  const env=environment({canRelaunchApplication:()=>true,mountApplication:()=>{
+    if(++mounts===1)return Promise.resolve(first);
+    return new Promise(resolve=>{finish=resolve;});
+  }});
+  await env.start();
+  const relaunch=env.context.vb6RestartApplication();
+  await new Promise(resolve=>setImmediate(resolve));
+  env.context.dispatchEvent({type:'pagehide',persisted:false});
+  await assert.rejects(relaunch,{name:'AbortError'});
+  finish({dispose(){lateDisposals++;this.disposed=true;}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(firstDisposals,1);assert.equal(lateDisposals,1);
+  assert.equal(env.context.vb6ApplicationStatus.phase,'disposed');
+  assert.equal(env.events.filter(event=>event.type==='vb6:ready').length,1);
+});
+
 test('the export desktop is opt-out and never injected into the authenticated IDE debug frame', async () => {
   for(const options of [{desktop:false},{bridgeToken:'ide-token'}]) {
     let desktops=0;

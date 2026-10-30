@@ -56,13 +56,13 @@ export function startExportedApplication() {
   async function mount(sessionState) {
     ensureActive();
     startupError = null;
-    closed = false;
     status.phase = 'loading'; status.error = null;
     desktop?.setLoading(true);
     if (banner) { banner.hidden = false; banner.setAttribute('role', 'status'); banner.textContent = 'Starting application…'; }
     const next = await VB6Runtime.mountApplication(project, document.getElementById('app'), sessionState ? {...options, sessionState} : options);
     if (!next || typeof next !== 'object') throw new Error('The application runtime did not return a host.');
     host = next;
+    closed = false;
     globalThis.vb6Application = host;
     if (departed) { closeHost(); throw cancelled(); }
     desktop?.bind(host);
@@ -81,7 +81,8 @@ export function startExportedApplication() {
     // all bytes/settings even when persistence was denied or disabled.
     saveHost(); closeHost();
     const sessionState = host?.fs ? {vfs: host.fs.snapshot(), settings: host.settings} : undefined;
-    host = null;
+    // Keep the closed host as the last complete in-memory session until a new
+    // host is returned. A failed mount must not erase it before another retry.
     launching = Promise.race([Promise.resolve().then(() => mount(sessionState)), departure]);
     globalThis.vb6ApplicationReady = launching;
     launching.then(() => { launching = null; }, error => { launching = null; fail(error); });

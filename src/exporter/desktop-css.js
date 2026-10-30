@@ -1,5 +1,6 @@
 export const APPLICATION_DESKTOP_CSS = `
 html[data-vb-desktop=true] #app{bottom:40px}
+html[data-vb-desktop=true] #vb6-startup{bottom:calc(40px + 1rem)}
 #vb6-desktop{font:12px/1.4 var(--vb-font,sans-serif);color:var(--vb-text);--disk-border:var(--vb-shadow)}
 #vb6-desktop .vb6-desktop-bar{position:fixed;bottom:0;left:0;right:0;height:40px;box-sizing:border-box;display:flex;align-items:center;gap:8px;padding:4px 8px;background:var(--vb-face);border-top:2px outset var(--vb-light);z-index:2147483001}
 #vb6-desktop button{font:inherit;color:inherit;background:var(--vb-face);border:2px outset var(--vb-light);padding:3px 10px;min-height:28px;cursor:pointer}

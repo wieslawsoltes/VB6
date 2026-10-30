@@ -82,10 +82,11 @@ def desktop_files(page):
       const fs=vb6Application.fs;
       fs.makeDirectory('/Exports');fs.makeDirectory('/Exports/Empty');
       fs.writeBytes('/Exports/check.bin',bytes);
+      fs.writeBytes('/Exports/retired.bin',[1]);
       vb6Application.settings.desktopTest=42;
       globalThis.closedHost=vb6Application;globalThis.relaunchEvents=0;
       addEventListener('vb6:ready',()=>{relaunchEvents++;});
-    }''', list(binary))
+    }''', list(binary[:-1]))
     page.locator('[data-control="cmdClose"]').click()
     wait_for_export(page, '!document.querySelector("[data-desktop-action=launch]").disabled')
     check(page.evaluate('[...vb6Application.vm.formInstances].every(instance=>!instance.loaded)'),
@@ -98,17 +99,55 @@ def desktop_files(page):
           'Order download changed its ANSI bytes')
     page.get_by_role('button', name='Up', exact=True).click()
     page.get_by_role('button', name='Exports', exact=True).click()
+    target = page.get_by_role('button', name='Download check.bin', exact=True)
+    target.focus()
+    page.evaluate('globalThis.desktopDownloadTarget=document.activeElement')
+    target.hover()
     with page.expect_download() as pending:
-        page.get_by_role('button', name='Download check.bin', exact=True).click()
+        page.mouse.down()
+        try:
+            retained = page.evaluate('''async bytes=>{
+              const fs=vb6Application.fs;
+              fs.remove('/Exports/check.bin');fs.writeBytes('/Exports/check.bin',bytes);
+              fs.remove('/Exports/retired.bin');fs.writeBytes('/Exports/aaa-added.txt',[65]);
+              vb6Application.stage.style.paddingLeft='1px';
+              // Let the mutation observer enqueue and complete its own refresh.
+              await new Promise(resolve=>setTimeout(resolve,0));
+              await new Promise(resolve=>setTimeout(resolve,0));
+              return desktopDownloadTarget.isConnected&&document.activeElement===desktopDownloadTarget;
+            }''', list(binary))
+            check(retained, 'Application repaint replaced or unfocused the active disk download button')
+        finally:
+            page.mouse.up()
     check(Path(pending.value.path()).read_bytes() == binary, 'Binary file download changed bytes')
+    wait_for_export(page, '!document.querySelector(\'[data-disk-path="/Exports/retired.bin"]\')&&!!document.querySelector(\'[data-disk-path="/Exports/aaa-added.txt"]\')')
+    check(page.evaluate('desktopDownloadTarget.isConnected&&document.activeElement===desktopDownloadTarget'),
+          'Completed disk refresh discarded the existing download control or its keyboard focus')
+    check(page.locator('[data-disk-path="/Exports/retired.bin"]').count() == 0, 'Removed file remained in the disk listing')
+    check(page.locator('[data-disk-path="/Exports/aaa-added.txt"]').count() == 1, 'New file was missing from the disk listing')
+    check(page.locator('[data-disk-path="/Exports/check.bin"] td').nth(1).inner_text() == str(len(binary)) + ' bytes',
+          'Replaced file retained its previous byte count')
     with page.expect_download() as pending:
         page.get_by_role('button', name='Download all (.zip)', exact=True).click()
     with zipfile.ZipFile(pending.value.path()) as archive:
         check(archive.read('Orders/Order-1001.txt') == expected, 'ZIP changed the saved order')
         check(archive.read('Exports/check.bin') == binary, 'ZIP changed binary bytes')
+        check(archive.read('Exports/aaa-added.txt') == b'A', 'ZIP missed a file created during a disk refresh')
+        check('Exports/retired.bin' not in archive.namelist(), 'ZIP retained a removed file')
         check('Exports/Empty/' in archive.namelist(), 'ZIP lost the empty directory')
     page.screenshot(path=str(REPORT / 'application-private-disk.png'), animations='disabled')
     page.locator('[data-desktop-action="close-files"]').click()
+    page.evaluate('''()=>{
+      const mount=VB6Runtime.mountApplication;let failNext=true;
+      VB6Runtime.mountApplication=(...args)=>{
+        if(failNext){failNext=false;return Promise.reject(new Error('Temporary restart failure'));}
+        return mount(...args);
+      };
+    }''')
+    page.locator('[data-desktop-action="launch"]').click()
+    wait_for_export(page, 'vb6ApplicationStatus.phase==="error"')
+    check(page.evaluate('vb6Application===closedHost&&closedHost.disposed'),
+          'Failed relaunch lost access to the last closed host')
     page.locator('[data-desktop-action="launch"]').click()
     wait_for_export(page, 'vb6Application!==closedHost&&vb6ApplicationStatus.phase==="ready"')
     ready(page)
