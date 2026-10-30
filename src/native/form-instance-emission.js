@@ -105,7 +105,7 @@ export const formInstanceEmission={
   // Native edit/static/button foreground/background messages share current state.
   const colors=x.unique();x.value(arg(12));for(const msg of [0x132,0x133,0x134,0x135,0x136,0x137,0x138])x.compare(msg).branch('e',colors);x.jump(fallback).label(colors);
   x.value(arg(20)).test().branch('e',fallback).push(-21).push(arg(20)).invoke('user32.dll','GetWindowLongW').test().branch('e',fallback).mov('ebx','eax');
-  this.nativeControlColors=true;x.push(arg(16)).pushOperand('ebx').call('native:control:colors').jump(exit);
+  this.nativeControlColors=true;x.push(arg(20)).push(arg(16)).pushOperand('ebx').call('native:control:colors').jump(exit);
   x.label(command);
   for(const c of module.controls.values()){
    const next=x.unique();x.value(arg(-16)).mov('eax',at('eax',c.hwndField.nativeFieldOffset)).test().branch('e',next).cmp('eax',at('ebp',20)).branch('ne',next);
@@ -142,7 +142,11 @@ export const formInstanceEmission={
   x.label(module.instanceSubclass).enter(96);this.enterCallbackBoundary(-12);
   x.push(arg(28)).call(this.controlProcedure('Retain')).mov(at('ebp',-20),'eax').mov('eax',at('eax',24)).sub('eax',F.registry).push().call(this.classProcedure('Retain')).mov(at('ebp',-16),'eax');
   x.value(arg(12)).compare(0x82).branch('e',detach).value(arg(-16)).cmp(at('eax',F.phase),2).branch('ne',fallback);
-  x.value(arg(-20)).cmp(at('eax',40),6);const notFrame=x.unique();x.branch('ne',notFrame).value(arg(12));for(const msg of [0x111,0x132,0x133,0x134,0x135,0x136,0x137,0x138])x.compare(msg).branch('e',forward);x.label(notFrame);
+  x.value(arg(-20)).cmp(at('eax',40),6);const notFrame=x.unique(),frameForward=x.unique();
+  x.branch('ne',notFrame).value(arg(12)).compare(0x14).branch('ne',frameForward);
+  this.nativeControlColors=true;
+  x.value(arg(-20)).mov('ebx',at('eax',8)).push(arg(8)).push(arg(16)).pushOperand('ebx').call('native:control:erase').jump(exit);
+  x.label(frameForward).value(arg(12));for(const msg of [0x111,0x132,0x133,0x134,0x135,0x136,0x137,0x138])x.compare(msg).branch('e',forward);x.label(notFrame);
   for(const control of module.controls.values()){
    const nextControl=x.unique();x.value(arg(-16)).mov('eax',at('eax',control.hwndField.nativeFieldOffset)).cmp('eax',at('ebp',8)).branch('ne',nextControl);
    for(const event of NATIVE_INPUT_EVENTS){

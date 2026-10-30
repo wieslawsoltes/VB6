@@ -114,10 +114,15 @@ Failed:
  n=RestoreDC(dc,saved)
  Error code
 End Function
-Private Sub SurfaceBackground(s As Surface, ByVal dc As Long, ByVal width As Long, ByVal height As Long)
+Private Sub SurfaceBackground(s As Surface, ByVal dc As Long, ByVal width As Long, ByVal height As Long, ByVal preserveMapping As Boolean)
  Dim bounds As RECT,brush As Long,n As Long,saved As Long,code As Long
  On Error GoTo Failed
- saved=PixelState(dc)
+ If preserveMapping Then
+  saved=SaveDC(dc)
+  If saved=0 Then Error 7
+ Else
+  saved=PixelState(dc)
+ End If
  bounds.right=width
  bounds.bottom=height
  brush=CreateSolidBrush(SurfaceColor(s.back))
@@ -177,7 +182,7 @@ Private Function SurfaceDC(s As Surface) As Long
  If bitmap=0 Then Error 7
  original=SelectObject(dc,bitmap)
  If original=0 Or original=-1 Then Error 7
- SurfaceBackground s,dc,w,h
+ SurfaceBackground s,dc,w,h,False
  If s.dc<>0 Then
   saved=PixelState(s.dc)
   n=BitBlt(dc,0,0,s.width,s.height,s.dc,0,0,&HCC0020)
@@ -217,9 +222,9 @@ Private Sub SurfaceClear(s As Surface)
  dc=SurfaceDC(s)
  If GetClientRect(s.hwnd,bounds)=0 Then Error 5
  If s.redraw<>0 Then
-  SurfaceBackground s,dc,s.width,s.height
+  SurfaceBackground s,dc,s.width,s.height,False
  Else
-  SurfaceBackground s,dc,bounds.right,bounds.bottom
+  SurfaceBackground s,dc,bounds.right,bounds.bottom,False
  End If
  s.x=0
  s.y=0
@@ -231,7 +236,7 @@ Private Sub SurfacePaint(s As Surface, ByVal target As Long)
  If GetClientRect(s.hwnd,bounds)=0 Then Exit Sub
  If bounds.right<=0 Or bounds.bottom<=0 Then Exit Sub
  If s.redraw=0 Then
-  SurfaceBackground s,target,bounds.right,bounds.bottom
+  SurfaceBackground s,target,bounds.right,bounds.bottom,True
   Exit Sub
  End If
  On Error GoTo Failed
@@ -300,9 +305,9 @@ Private Sub SurfaceBackgroundChanged(s As Surface)
  dc=SurfaceDC(s)
  If GetClientRect(s.hwnd,bounds)=0 Then Error 5
  If s.redraw<>0 Then
-  SurfaceBackground s,dc,s.width,s.height
+  SurfaceBackground s,dc,s.width,s.height,False
  Else
-  SurfaceBackground s,dc,bounds.right,bounds.bottom
+  SurfaceBackground s,dc,bounds.right,bounds.bottom,False
  End If
  n=InvalidateRect(s.hwnd,0,0)
 End Sub
