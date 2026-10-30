@@ -1,3 +1,4 @@
+import {validateOleContainerBrowser} from './ole-container-browser.js';
 /** The same public API contracts run against ESM source and the generated runtime. */
 export async function validateComOleBrowser(api) {
   const checks=[];
@@ -57,5 +58,6 @@ End Sub`}]});
     try{drag.enter(target,1,{x:1,y:2});drag.update(false,1,{x:2,y:3});equal(drag.update(false,0,{x:3,y:4}),{hresult:C.HRESULT.DRAGDROP_S_DROP,effect:1},'drag completion');equal(events,['enter','over','drop'],'ordered drag callbacks');}
     finally{drag.cancel();source.Release();target.Release();}
   } finally {clipboard.close();data.Release();stream.Release();}
+  checks.push(...await validateOleContainerBrowser(api));
   return checks;
 }

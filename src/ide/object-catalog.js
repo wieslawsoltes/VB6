@@ -32,7 +32,7 @@ export function buildObjectCatalog(project){
   const groups={};
   for(const intrinsic of BUILTIN_SYMBOLS){const group=builtinGroup(intrinsic.name);(groups[group]||=[]).push({...intrinsic,description:'Implemented browser runtime intrinsic. Typed metadata is shared with IntelliSense; full native coercion parity is not implied.'});}
   for(const [group,members]of Object.entries(groups))if(members.length)add('VBA',group,'Implemented intrinsic functions',members);
-  for(const name of ['Form','MDIForm',...BASIC_CONTROL_TYPES.filter(n=>!['Pointer','OLE'].includes(n)),...EXTENDED_CONTROL_TYPES]){
+  for(const name of ['Form','MDIForm',...BASIC_CONTROL_TYPES.filter(n=>n!=='Pointer'),...EXTENDED_CONTROL_TYPES]){
     const props=['Form','MDIForm'].includes(name)?createForm().form.properties:createControl(name).properties;
     const members=Object.entries(props).map(([name,value])=>({name,kind:'property',signature:name+' As '+(typeof value==='number'?'Long':Array.isArray(value)?'Variant':'String'),description:'Browser control property. Default: '+JSON.stringify(value)}));
     const event=DEFAULT_EVENTS[name];if(event)members.push({name:event,kind:'event',signature:'Event '+event+'('+defaultEventSignature(name,event)+')',description:'Default browser control event.'});

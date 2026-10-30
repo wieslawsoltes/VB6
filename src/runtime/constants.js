@@ -1,8 +1,10 @@
+import {OLE_CONSTANTS} from '../controls/ole-contract.js';
 import {GRAPHICS_CONSTANTS} from '../graphics/constants.js';
 import {WEB_BROWSER_CONSTANTS} from '../controls/webbrowser-contract.js';
 /** Shared immutable compiler/runtime intrinsic constants. */
 export const VB_CONSTANTS = {
   ...WEB_BROWSER_CONSTANTS,
+  ...OLE_CONSTANTS,
   ...GRAPHICS_CONSTANTS,
   vbTrue:-1,vbFalse:0,vbUseDefault:-2,vbCr:'\r',vbLf:'\n',vbCrLf:'\r\n',vbNewLine:'\r\n',vbTab:'\t',vbNullChar:'\0',vbNullString:'',vbBack:'\b',vbFormFeed:'\f',vbVerticalTab:'\v',
   vbBlack:0,vbRed:255,vbGreen:65280,vbYellow:65535,vbBlue:16711680,vbMagenta:16711935,vbCyan:16776960,vbWhite:16777215,

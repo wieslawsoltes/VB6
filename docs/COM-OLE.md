@@ -1,5 +1,8 @@
 # COM, Automation and OLE
 
+For the intrinsic browser **OLE** document control, its designer property pages,
+portable document classes and HTML exports, see [OLE-DOCUMENTS.md](OLE-DOCUMENTS.md).
+
 The implementation has three reusable layers. Portable JavaScript contracts do
 not pretend to be a Windows binary ABI. The native companion invokes installed
 Windows COM/OLE services after explicit host consent. Both feed the existing VB
