@@ -8,6 +8,7 @@ import {THEMES} from '../src/theme/theme.js';
 import {exportApplication, exportApplicationFiles, inspectApplicationExport, createApplicationExporter, RUNTIME_VERSION} from '../src/exporter/exporter.js';
 import {APPLICATION_BOOTSTRAP} from '../src/exporter/bootstrap.js';
 import {APPLICATION_SHELL_CSS} from '../src/exporter/document.js';
+import {VirtualFileSystem} from '../src/runtime/filesystem.js';
 
 const embedded = (html, id) => JSON.parse(new RegExp(`<script id="${id}" type="application/json">([\\s\\S]*?)<\\/script>`).exec(html)[1]);
 for (const example of EXAMPLES) test('split deployment preserves complete ' + example.id, () => {
@@ -206,5 +207,35 @@ test('invalid mount results report a startup error rather than exposing a fake r
     const env = environment({mountApplication: async () => host});
     await assert.rejects(env.start(), /did not return a host/);
     assert.ok(!env.events.some(e => e.type === 'vb6:ready'));
+  }
+});
+
+test('relaunch replaces one host and preserves memory-only files/settings without reconfiguring adapters', async () => {
+  let mounts=0,disposed=0,configured=0,received;
+  const disk=new VirtualFileSystem();disk.writeBytes('/kept.bin',[0,255,129]);
+  const first={vm:{state:'stopped'},fs:disk,settings:{counter:7},persist(){throw Error('storage denied');},dispose(){disposed++;this.disposed=true;}};
+  const next={vm:{state:'idle'},fs:disk,settings:{counter:7}};
+  const env=environment({canRelaunchApplication:()=>true,mountApplication:async(p,c,o)=>{mounts++;received=o;return mounts===1?first:next;}});
+  env.context.vb6ConfigureApplication=()=>{configured++;return {};};
+  await env.start();
+  const a=env.context.vb6RestartApplication(),b=env.context.vb6RestartApplication();
+  assert.equal(a,b);assert.equal(await a,next);assert.equal(mounts,2);assert.equal(disposed,1);assert.equal(configured,1);
+  assert.deepEqual(received.sessionState.vfs,disk.snapshot());assert.deepEqual(received.sessionState.settings,{counter:7});
+  assert.equal(env.context.vb6Application,next);assert.equal(env.context.vb6ApplicationReady,a);
+  assert.equal(env.context.vb6ApplicationStatus.phase,'ready');
+});
+
+test('launching an application that still owns live forms never creates a second VM', async () => {
+  let mounts=0,disposed=0;const host={vm:{state:'idle'},dispose(){disposed++;}};
+  const env=environment({canRelaunchApplication:()=>false,mountApplication:async()=>{mounts++;return host;}});
+  await env.start();assert.equal(await env.context.vb6RestartApplication(),host);assert.equal(mounts,1);assert.equal(disposed,0);
+});
+
+test('the export desktop is opt-out and never injected into the authenticated IDE debug frame', async () => {
+  for(const options of [{desktop:false},{bridgeToken:'ide-token'}]) {
+    let desktops=0;
+    const env=environment({mountApplication:async()=>({}),createApplicationDesktop(){desktops++;return {bind(){},setLoading(){}};}});
+    env.nodes['vb6-options'].textContent=JSON.stringify(options);
+    await env.start();assert.equal(desktops,0);
   }
 });
