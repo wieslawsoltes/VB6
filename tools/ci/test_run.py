@@ -55,6 +55,8 @@ class RunnerTests(unittest.TestCase):
                 self.assertEqual(combined,run.plan('figma',engine,origin))
     def test_process_deadlines_are_scoped_to_measured_standalone_suites(self):
         expected={
+            ('webkit','http','browser-application-theme-tests.py'):900,
+            ('webkit','file','browser-application-theme-tests.py'):900,
             ('webkit','file','figma-browser-tests.py'):900,
             ('webkit','file','figma-editor-browser-tests.py'):900,
             ('webkit','file','figma-services-browser-tests.py'):900,
@@ -84,7 +86,8 @@ class RunnerTests(unittest.TestCase):
             ('file','figma-browser-tests.py'),('file','figma-editor-browser-tests.py'),
             ('file','figma-services-browser-tests.py'),
             ('http','native-project-browser-tests.py'),('file','native-project-browser-tests.py'),
-            ('file','browser-advanced-editor-tests.py')]]
+            ('file','browser-advanced-editor-tests.py'),
+            ('http','browser-application-theme-tests.py'),('file','browser-application-theme-tests.py')]]
         with tempfile.TemporaryDirectory() as d,contextlib.redirect_stdout(io.StringIO()):
             root=Path(d);observed=[]
             def execute(task,root,env,log,timeout,cancelled):

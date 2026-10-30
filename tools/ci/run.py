@@ -26,6 +26,11 @@ ENGINES = ('chromium', 'firefox', 'webkit')
 # two slow suites into isolated workers does not relax their action deadlines.
 # Memory transport and all other engines retain the ordinary eight-minute bound.
 SCRIPT_TIMEOUTS = {
+    # Validate #1493 passed 46/53 appearance cases before the 480s batch
+    # deadline. Keep all cases and their 10s interaction limits; allow the
+    # complete mixed HTTP/file matrix inside its existing 25-minute job.
+    ('webkit', 'browser-application-theme-tests.py', 'http'): 900,
+    ('webkit', 'browser-application-theme-tests.py', 'file'): 900,
     ('webkit', 'native-project-browser-tests.py', 'http'): 1200,
     ('webkit', 'native-project-browser-tests.py', 'file'): 1200,
     ('webkit', 'figma-browser-tests.py', 'file'): 900,
@@ -239,7 +244,7 @@ def run_batch(tasks, root, engine, report, timeout=None, cancelled=None, execute
             if task.get('caseShards'):
                 record.update(execute_case_shards(task, root, env, log, deadline, cancelled, execute_fn))
             else:
-                record.update(execute_fn(task, root, env, log, deadline, cancelled))
+                record.update(execute_fn(task, root, env, log,deadline,cancelled))
         except Exception as failure:
             record.update(status='failed', error=str(failure))
         finally:

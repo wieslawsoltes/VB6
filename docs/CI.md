@@ -249,3 +249,20 @@ Vim branch's guarded failed-setup cleanup and immediate error reporting. Memory
 setup retains DOMContentLoaded because set_content does not navigate. Startup is
 bounded at 60 seconds; interaction deadlines and actual IDE readiness predicates
 remain separate. No functional test body is removed to reconcile the branches.
+
+## Complete application-appearance budget
+
+The WebKit application-appearance suite retains all 53 tests, including inherited
+macOS/X11 checks, real HTTP/file navigation and unchanged ten-second interaction
+deadlines. Validate #1493 completed 46 cases successfully before its 480-second
+process deadline terminated the standalone-file case. The complete suite now has
+a scoped 900-second process budget on WebKit's real-origin invocations, within its
+existing 25-minute job. Chromium, Firefox and memory-mode budgets are unchanged;
+explicit caller limits still take precedence. There are no retries or new skips.
+
+Linux packaging cancellation fixtures wait for a complete newline-terminated PID
+record before cancelling. A shell redirection can expose an empty file before
+`printf` writes, so file existence alone is not readiness. The original two-second
+polling bound, process-group termination and descendant-liveness assertions remain
+unchanged. Deterministic tests cover absent, empty, partially written, malformed
+and unreadable PID markers.
