@@ -139,6 +139,8 @@ class Themes(X11IdeChecks, unittest.TestCase):
         self.page.wait_for_function('typeof vb6Studio==="object" && vb6Studio.appearance.theme==="classic" && vb6Studio.project.settings.theme==="classic"')
         self.assertEqual(self.page.locator('html').get_attribute('data-ide-theme'),'classic')
         self.assertEqual(self.page.locator('.designer-scroll').get_attribute('data-vb-theme'),'classic')
+        self.assertEqual(self.page.locator('html').evaluate('e=>getComputedStyle(e).getPropertyValue("--vb-face").trim()'),'#c0c0c0')
+        self.assertEqual(self.page.locator('[data-command-bar=standard]').evaluate('e=>getComputedStyle(e).backgroundColor'),'rgb(192, 192, 192)')
         self.record('Explicit Windows Classic IDE and application choices survive reload')
 
     @unittest.skipIf(MEMORY, 'Real saved workspace requires an origin; memory transport has an opaque origin')

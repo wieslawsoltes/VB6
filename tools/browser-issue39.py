@@ -52,7 +52,7 @@ def page(dpr=1,size=(1100,800),forced=False):
     p.set_default_timeout(7000);p.errors=[];p.on('pageerror',lambda e:p.errors.append(str(e)));return p
 def fixture(dpr=1,html='',forced=False):
     p=page(dpr,forced=forced)
-    p.set_content('<!doctype html><meta charset="utf-8"><style>'+CSS+'\nhtml,body{margin:0;min-width:0;min-height:0;background:white;overflow:visible}</style>'+html)
+    p.set_content('<!doctype html><html data-vb-theme="classic"><meta charset="utf-8"><style>'+CSS+'\nhtml,body{margin:0;min-width:0;min-height:0;background:white;overflow:visible}</style>'+html)
     p.add_script_tag(content=BUNDLE);return p
 def ide(dpr=1,size=(1312,966),mode=None):
     mode=mode or ('inline' if args.inline else 'http')
@@ -60,7 +60,8 @@ def ide(dpr=1,size=(1312,966),mode=None):
     if mode=='inline':p.set_content(IDE)
     else:p.goto(HTTP if mode=='http' else (ROOT/'dist/VB6-Studio-Web.html').as_uri())
     p.wait_for_function('window.vb6Studio')
-    p.evaluate('p=>{vb6Studio.loadProject(p);vb6Studio.openDocument(p.modules[0].id,"code");vb6Studio.showDebug("Immediate");}',CALCULATOR)
+    # Pin the authored Classic pixel contract independently of startup defaults.
+    p.evaluate('p=>{p.settings.theme="classic";vb6Studio.loadProject(p);vb6Studio.appearance.theme="classic";vb6Studio.applyAppearance();vb6Studio.openDocument(p.modules[0].id,"code");vb6Studio.showDebug("Immediate");}',CALCULATOR)
     p.evaluate('()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');return p
 COLORS={'face':(192,192,192),'dark':(0,0,0),'light':(255,255,255),'shadow':(128,128,128),'highlight':(223,223,223),'text':(0,0,0),'gray':(128,128,128)}
 def staircase(w,h,dpr,pressed=False,sunken=False):
