@@ -79,6 +79,29 @@ class Themes(X11IdeChecks, unittest.TestCase):
     def direct_theme(self, theme, **preferences):
         self.page.evaluate('a=>{Object.assign(vb6Studio.appearance,a);vb6Studio.applyAppearance();}',{'theme':theme,**preferences})
         self.page.wait_for_timeout(130)
+    def test_default_palette_never_overrides_an_explicit_root_theme(self):
+        # Exercise the actual generated CSS cascade, not just theme attributes.
+        preview=self.context.new_page()
+        preview.set_content('<!doctype html><html><body>Palette</body></html>')
+        preview.add_style_tag(content=(ROOT/'src/theme/palette.css').read_text())
+        expected={'classic':'#c0c0c0','standard':'#d4d0c8','contrast':'#000000'}
+        face='getComputedStyle(document.documentElement).getPropertyValue("--vb-face").trim()'
+        self.assertEqual(preview.evaluate(face),expected['standard'])
+        for theme in [*expected,*THEMES]:
+            preview.evaluate('theme=>{document.documentElement.dataset.vbTheme=theme;}',theme)
+            root=preview.evaluate(face)
+            nested=preview.evaluate('''theme=>{
+              const node=document.createElement('section');node.dataset.vbTheme=theme;
+              document.body.append(node);
+              const face=getComputedStyle(node).getPropertyValue('--vb-face').trim();node.remove();return face;
+            }''',theme)
+            self.assertEqual(root,nested,theme+' root and nested palettes must match')
+            if theme in expected:self.assertEqual(root,expected[theme])
+        preview.close()
+        for theme,color in expected.items():
+            self.set_theme(theme)
+            self.assertEqual(self.page.evaluate(face),color)
+        self.record('root palettes',explicitThemes=9,default='standard')
     def test_standard_default_startup_and_options(self):
         self.assertEqual(self.page.locator('html').get_attribute('data-ide-theme'),'standard')
         self.assertEqual(self.page.locator('.designer-scroll').get_attribute('data-vb-theme'),'standard')
