@@ -13,9 +13,14 @@ def check(value,message='Assertion failed'):
     if not value: raise AssertionError(message)
 def boot(browser):
     p=browser.new_page(viewport={'width':1440,'height':960})
-    p.set_default_timeout(4500); p._errors=[]
-    p.on('pageerror',lambda e:p._errors.append(str(e)))
-    p.set_content(HTML);p.wait_for_function('typeof vb6Studio!=="undefined" && !!vb6Studio.ideTools')
+    try:
+        p.set_default_timeout(4500); p._errors=[]
+        p.on('pageerror',lambda e:p._errors.append(str(e)))
+        # Standalone parsing is boot setup; later readiness and actions keep 4.5s.
+        p.set_content(HTML,timeout=60000);p.wait_for_function('typeof vb6Studio!=="undefined" && !!vb6Studio.ideTools')
+    except Exception:
+        p.close()
+        raise
     return p
 def command(p,name):p.evaluate('(id)=>{vb6Studio.command(id);}',name)
 def case(browser,name,fn):

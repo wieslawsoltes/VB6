@@ -5,6 +5,9 @@ import {patchNativeSource,patchWinUISource} from './source-edits.js';
 import {createWinUISchema,registerMacOS26Schema,MACOS26_NS,MACOS26_CONTROLS,compileXaml,escapeXml,diagnostic,isXmlName,PRESENTATION_NS,XAML_NS} from '../../packages/xaml-compiler/src/index.js';
 import {MACOS26_PROPERTY_DEFAULTS,MACOS26_PROPERTIES,validateMacOS26Properties,clearMacOS26ColorRoles} from '../theme/macos26-compat.js';
 import {macos26ColorFallback} from '../theme/macos26-resources.js';
+import {WINUI3_RESOURCE_KEYS} from '../theme/winui3-resources.js';
+import {clearWinUI3Overrides,validateWinUI3Properties} from '../theme/winui3-compat.js';
+import {isWinUI3Namespace,isWinUI3ThemeResource,winui3ThemeResource,winui3ThemeValue,mapWinUI3Value,winui3BuiltinResource,winui3BuiltinDictionary,winui3DefaultStyle,winui3StateResources,winui3BrushColor,winui3LinearBrush,winui3OleColor,WINUI3_CONTROL_ALIASES,WINUI3_RENDERED_PROPERTIES,validateWinUI3LoweredValue,winui3Event} from './winui3-lowering.js';
 import {CONTROL_DEFAULTS,createControl,createForm,newProject,normalizeProject,newId} from '../project/model.js';
 import {LAYOUT_DEFAULTS,validateLayout} from '../layout/contract.js';
 import {arrangeFormEdit,parentIds} from '../layout/model.js';
@@ -23,6 +26,8 @@ export function createVb6XamlSchema() {
   for (const key of extraNumbers.split(' ')) members[key] = 'Double';
   for (const key of extraStrings.split(' ')) members[key] = 'String';
   for (const [key,value] of Object.entries(MACOS26_PROPERTY_DEFAULTS)) members[key] = propertyType(value);
+  members.WinUI3='Json';
+  for(const key of WINUI3_RESOURCE_KEYS)schema.themeResourceKeys.add(key);
   members.Children = {type:'Object',collection:true};
   schema.registerType(VB6_XAML_NS,'Component',{members,contentProperty:'Children',runtimeNameProperty:null,assignableTo:[{namespaceURI:PRESENTATION_NS,name:'UIElement'}]});
   for (const name of nativeTypes) {
@@ -127,16 +132,22 @@ export function compileFormXaml(text, {form:previous,settings={},schema=createVb
   const previousById=new Map(previousNodes.map(n=>[n.id,n])),previousByName=new Map();
   for(const node of previousNodes){const key=JSON.stringify([node.name.toLowerCase(),node.type,node.properties?.Index]);const list=previousByName.get(key)??[];list.push(node);previousByName.set(key,list);}
   let sequence = 0, expandedLength = 0;
-  const statics=createStaticValues(compilation,{themeColor:macOS26ThemeColor});
-  const constant=(value,scopes)=>{const v=statics.constant(value,scopes);return isMacOS26ThemeColor(v)?v:jsonValue(v);};
+  const winuiRoot=isWinUI3Namespace(compilation.root.type.namespaceURI),initialTheme=settings.theme==='contrast'?'HighContrast':/-dark$/.test(settings.theme??'')?'Dark':'Light';
+  const statics=createStaticValues(compilation,{themeColor:macOS26ThemeColor,...(winuiRoot?{themeResource:winui3ThemeResource,builtinResource:winui3BuiltinResource,builtinDictionary:winui3BuiltinDictionary,defaultStyle:winui3DefaultStyle,brushColor:winui3BrushColor,linearBrush:winui3LinearBrush,initialTheme}:{})});
+  const constant=(value,scopes)=>{const v=statics.constant(value,scopes);return isMacOS26ThemeColor(v)||isWinUI3ThemeResource(v)?v:jsonValue(v);};
   const usedNames=new Set(compilation.nodes.map(n=>n.name??plain(n).Name?.value?.value).filter(n=>typeof n==='string').map(n=>n.toLowerCase()));
   function lower(node,parent=null,root=false,list=controls,inheritedResources=[],tabPage) {
     if (node.kind !== 'Object') { error('A form child must be a control object.',node.source); return null; }
-    const native = node.type.namespaceURI === VB6_XAML_NS, mac=node.type.namespaceURI===MACOS26_NS, compatibility=mac?MACOS26_CONTROLS[node.type.name]:null;
+    const native = node.type.namespaceURI === VB6_XAML_NS, mac=node.type.namespaceURI===MACOS26_NS, winuiSource=isWinUI3Namespace(node.type.namespaceURI),winui=winuiRoot&&winuiSource, compatibility=mac?MACOS26_CONTROLS[node.type.name]:null;
     const sourceType=compatibility?.presentationType??node.type.name, originalValues = plain(node), metadata = design(node);
     let scopes=inheritedResources,properties=node.properties;
     try {
       scopes=[statics.dictionary(originalValues.Resources?.value,inheritedResources),...inheritedResources];
+      if(winui&&originalValues.RequestedTheme) {
+        const requested=statics.convert(originalValues.RequestedTheme.value,originalValues.RequestedTheme.member,inheritedResources);
+        if(isWinUI3ThemeResource(requested))throw new Error('RequestedTheme cannot itself be a live ThemeResource.');
+        if(initialTheme!=='HighContrast'&&requested!=='Default')scopes[0].theme=requested;
+      }
       if(!native)properties=statics.properties(node,scopes);
     } catch(e){error(e.message,node.source);}
     // A local paint overrides a role from a shared style (and vice versa).
@@ -148,7 +159,12 @@ export function compileFormXaml(text, {form:previous,settings={},schema=createVb
       else properties=properties.filter(p=>p!==(color.fromStyle?color:semantic));
     }
     const values=plain({properties});
-    let type = native ? metadata.Type ?? node.type.name : compatibility?.nativeType ?? (node.type.namespaceURI===PRESENTATION_NS ? aliases[node.type.name] : null);
+    if(winui&&values.RequestedTheme)try {
+      const requested=statics.convert(values.RequestedTheme.value,values.RequestedTheme.member,scopes);
+      if(isWinUI3ThemeResource(requested))throw new Error('RequestedTheme cannot itself be a live ThemeResource.');
+      scopes[0].theme=initialTheme==='HighContrast'?'HighContrast':requested==='Default'?(inheritedResources[0]?.theme??initialTheme):requested;
+    }catch(e){error(e.message,values.RequestedTheme.source);}
+    let type = native ? metadata.Type ?? node.type.name : compatibility?.nativeType ?? (winuiSource ? WINUI3_CONTROL_ALIASES[node.type.name]??aliases[node.type.name] : null);
     if(!native&&sourceType==='ScrollBar') {
       try{if(values.Orientation&&statics.convert(values.Orientation.value,values.Orientation.member,scopes)==='Vertical')type='VScrollBar';}catch(e){error(e.message,values.Orientation.source);}
     }
@@ -182,22 +198,43 @@ export function compileFormXaml(text, {form:previous,settings={},schema=createVb
     const mapping = {id,name,type,tag:node.type.name,namespaceURI:node.type.namespaceURI,native,start:node.source.start,end:node.source.end,properties:{},order:metadata.Order ?? list.length};
     sourceMap.push(mapping);
     const set = (key,value,p,encoding='direct') => { target.properties[key]=value; if(p)mapping.properties[key]={fromStyle:!!p.fromStyle,start:p.source.start,end:p.source.end,name:p.member.attached?p.member.owner+'.'+p.member.name:p.member.name,namespaceURI:p.member.namespaceURI,attached:!!p.member.attached,encoding}; };
+    const winuiAppearance=winui?{version:1,sourceType:node.type.name,...(properties.builtinStyle?{style:properties.builtinStyle}:{}),properties:{},resources:{}}:null;
+    if(winui) {
+      set('WinUI3',winuiAppearance);
+      set('FontName','Segoe UI Variable');set('FontSize',10.5);
+      if(['CommandButton','CheckBox','OptionButton','Label'].includes(type))set('Caption','');
+      if(node.type.name==='ToggleButton')set('Style',1);
+      if(node.type.name==='HyperlinkButton')set('FontUnderline',-1);
+      if(node.type.name==='PasswordBox')set('PasswordChar','*');
+    }
+    const setWinUI=(key,value,p)=>{
+      const converted=mapWinUI3Value(value,v=>validateWinUI3LoweredValue(key,v)),fallback=winui3ThemeValue(converted,scopes[0]?.theme??initialTheme);
+      winuiAppearance.properties[key]=fallback;
+      if(isWinUI3ThemeResource(converted))winuiAppearance.resources[key]={key:converted.key,values:{...converted.values}};
+      return fallback;
+    };
     if(tabPage!==undefined)set('TabPage',tabPage);
     if (!native && ['Canvas','Grid','StackPanel','Border'].includes(sourceType)) { set('BorderStyle',0);set('Caption',''); }
     if (!native && sourceType === 'Ellipse') set('Shape',2);
     if(mac) {
+      if(['View','Canvas','StackView','Grid'].includes(node.type.name))set('TabStop',0);
       if(['CommandButton','CheckBox','OptionButton','Label','Frame'].includes(type))set('Caption','');
       if(node.type.name==='SearchField')set('MacOSControlStyle','search');
       if(node.type.name==='Switch')set('MacOSControlStyle','switch');
+      if(node.type.name==='SegmentedControl')set('MacOSControlStyle','segmented');
       if(node.type.name==='TabView')target.designerTabPages=true;
       if(node.type.name==='SecureField')set('PasswordChar','*');
       if(node.type.name==='TextEditor'){set('MultiLine',-1);set('ScrollBars',3);}
     }
-    if (!native && ['Grid','StackPanel'].includes(sourceType)) {
+    // Border arranges its single child in the padded inner rectangle. Reuse a
+    // one-cell grid so omitted child dimensions stretch inside that rectangle,
+    // instead of leaving the native PictureBox fallback size and origin.
+    const borderLayout=winui&&sourceType==='Border'&&(values.Child||settings.anchoring===true);
+    if (!native && (['Grid','StackPanel'].includes(sourceType)||borderLayout)) {
       if (settings.anchoring !== true) error('Enable anchoring and automatic layout to lower '+node.type.name+'.',node.source,'VBXAML2002');
       else {
-        set('LayoutMode',sourceType === 'Grid'?5:values.Orientation&&statics.convert(values.Orientation.value,values.Orientation.member,scopes)==='Horizontal'?1:2);
-        if(sourceType==='Grid'){set('LayoutGridColumns','1fr');set('LayoutGridRows','1fr');}
+        set('LayoutMode',sourceType !== 'StackPanel'?5:values.Orientation&&statics.convert(values.Orientation.value,values.Orientation.member,scopes)==='Horizontal'?1:2);
+        if(sourceType!=='StackPanel'){set('LayoutGridColumns','1fr');set('LayoutGridRows','1fr');}
       }
     }
     const children = [], deferred = [];
@@ -274,7 +311,10 @@ export function compileFormXaml(text, {form:previous,settings={},schema=createVb
             return size.unit==='star'?size.value+'fr':size.unit==='auto'?'hug':String(size.value*15);
           });set(key==='RowDefinitions'?'LayoutGridRows':'LayoutGridColumns',tracks.join(' '),p);continue;
         }
-        const v = statics.convert(p.value,p.member,scopes);
+        const converted = statics.convert(p.value,p.member,scopes);
+        if(winui&&isWinUI3ThemeResource(converted)&&!WINUI3_RENDERED_PROPERTIES.has(key))throw new Error('Live ThemeResource '+key+' is not implemented by the native layout/value target. Use StaticResource for a compile-time snapshot.');
+        const v=winui&&!isMacOS26ThemeColor(converted)&&WINUI3_RENDERED_PROPERTIES.has(key)?setWinUI(key,converted,p):converted;
+        if(winui&&['Header','OnContent','OffContent'].includes(key)&&node.type.name!=='ToggleSwitch')throw new Error(node.type.name+'.'+key+' requires a header/content presenter that is not implemented.');
         if (key === 'Name' && !p.member.attached) continue;
         if (p.member.attached && p.member.owner === 'Canvas' && ['Left','Top'].includes(key)) set(key,Number(v)*15,p,'dip');
         else if (p.member.attached && p.member.owner === 'Grid' && ['Row','Column','RowSpan','ColumnSpan'].includes(key)) { if(settings.anchoring!==true)throw new Error('Grid placement requires automatic layout.');set('Layout'+key,v,p); }
@@ -285,17 +325,17 @@ export function compileFormXaml(text, {form:previous,settings={},schema=createVb
         else if (key === 'Password') {set('Text',String(v),p);set('PasswordChar','*');}
         else if (key === 'FontFamily') set('FontName',v,p);
         else if (key === 'FontSize') set('FontSize',v*0.75,p,'font');
-        else if (key === 'FontWeight') {if(!['Normal','Bold','400','700'].includes(String(v)))throw new Error('VB6 supports normal or bold font weights.');set('FontBold',v==='Bold'||Number(v)===700?-1:0,p,'bold');}
+        else if (key === 'FontWeight') {if(!winui&&!['Normal','Bold','400','700'].includes(String(v)))throw new Error('VB6 supports normal or bold font weights.');set('FontBold',winui?v>=600?-1:0:v==='Bold'||Number(v)===700?-1:0,p,'bold');}
         else if (key === 'FontStyle') {if(v==='Oblique')throw new Error('Oblique is not equivalent to VB6 FontItalic.');set('FontItalic',v==='Italic'?-1:0,p,'italic');}
         else if (key === 'Visibility') set('Visible',v==='Visible'?-1:0,p,'visibility');
         else if (['IsEnabled','IsTabStop','IsReadOnly','AcceptsReturn'].includes(key)) set({IsEnabled:'Enabled',IsTabStop:'TabStop',IsReadOnly:'Locked',AcceptsReturn:'MultiLine'}[key],v?-1:0,p,'flag');
-        else if (key === 'IsChecked') {if(v===null&&type!=='CheckBox')throw new Error('Null IsChecked requires CheckBox.');set('Value',v===null?2:v?mac&&type==='OptionButton'?-1:1:0,p,mac&&type==='OptionButton'?'radio-checked':'checked');}
+        else if (key === 'IsChecked'||winui&&key==='IsOn') {if(v===null&&type!=='CheckBox')throw new Error('Null IsChecked requires CheckBox.');set('Value',v===null?2:v?mac&&type==='OptionButton'?-1:1:0,p,mac&&type==='OptionButton'?'radio-checked':'checked');}
         else if (['Background','Foreground','Fill','Stroke'].includes(key)) {
           if(isMacOS26ThemeColor(v)) {
             if(!['Background','Foreground'].includes(key))throw new Error('Semantic ThemeResource colors currently require Background or Foreground.');
             set(key==='Background'?'BackColor':'ForeColor',v.fallback,p,'color');
             set(key==='Background'?'MacOSBackgroundRole':'MacOSForegroundRole',v.role,p,'theme-resource');
-          } else set({Background:'BackColor',Foreground:'ForeColor',Fill:'FillColor',Stroke:'BorderColor'}[key],toColor(v),p,'color');
+          } else set({Background:'BackColor',Foreground:'ForeColor',Fill:'FillColor',Stroke:'BorderColor'}[key],winui&&['Background','Foreground'].includes(key)?winui3OleColor(v):toColor(v),p,'color');
           if(key==='Fill')set('FillStyle',0);
           if(key==='Background'&&type==='Label')set('BackStyle',1);
         }
@@ -320,6 +360,14 @@ export function compileFormXaml(text, {form:previous,settings={},schema=createVb
         else if(mac&&key==='Stretch'&&type==='Image'){if(!['None','Fill'].includes(v))throw new Error('Image.Stretch currently supports None and Fill; aspect-fit/crop cannot be silently approximated.');set('Stretch',v==='Fill'?-1:0,p,'image-stretch');}
         else if(key==='SelectionMode'&&type==='ListBox')set('MultiSelect',['Single','Multiple','Extended'].indexOf(v),p);
         else if(key==='IsEditable'&&type==='ComboBox')set('Style',v?0:2,p);
+        else if(winui&&key==='RequestedTheme'){winuiAppearance.requestedTheme=v;if(initialTheme!=='HighContrast'&&v!=='Default')scopes[0].theme=v;}
+        else if(winui&&['BorderBrush','BorderThickness','CornerRadius','Opacity','TextWrapping','TextTrimming','HorizontalContentAlignment','VerticalContentAlignment','IsIndeterminate','OnContent','OffContent','BackgroundSizing','UseSystemFocusVisuals','FocusVisualMargin'].includes(key)){}
+        else if(winui&&key==='LineStackingStrategy') {if(v!=='MaxHeight')throw new Error('Only the default MaxHeight line stacking strategy is implemented.');}
+        else if(winui&&key==='TextLineBounds') {if(v!=='Full')throw new Error('Only Full text line bounds are implemented.');}
+        else if(winui&&key==='OpticalMarginAlignment') {if(v!=='None')throw new Error('Optical margin trimming requires glyph-sidebearing measurement.');}
+        else if(winui&&key==='Header'&&node.type.name==='ToggleSwitch')set('Caption',v,p);
+        else if(winui&&key==='IsThreeState') {if(v)throw new Error('IsThreeState cycling requires an implemented tri-state interaction policy.');}
+        else if(winui&&key==='Padding'&&!['Form','MDIForm','PictureBox','Frame'].includes(type)){}
         else if(key==='Margin'||key==='Padding') {
           if(settings.anchoring!==true)throw new Error(key+' requires automatic layout.');
           if(key==='Padding'&&!['Form','MDIForm','PictureBox','Frame'].includes(type))throw new Error('Padding is supported only on native layout containers.');
@@ -327,10 +375,16 @@ export function compileFormXaml(text, {form:previous,settings={},schema=createVb
           for(const [i,side] of ['Left','Top','Right','Bottom'].entries())set('Layout'+key+side,v[i]*15,p,'dip');
         }
         else if(['HorizontalAlignment','VerticalAlignment'].includes(key)) {
+          // Canvas arranges at explicit coordinates with the desired child
+          // size, so native WinUI ignores both alignment properties here.
+          if(winui&&parent?.properties.WinUI3?.sourceType==='Canvas')continue;
           if(settings.anchoring!==true)throw new Error('Alignment requires automatic layout.');
           const mode=parent?.properties.LayoutMode,vertical=key==='VerticalAlignment';
           if(mode===5)set(vertical?'LayoutAlign':'LayoutJustifySelf',['Top','Center','Bottom','Stretch'].indexOf(vertical?v:({Left:'Top',Right:'Bottom'}[v]??v)),p);
           else if(mode===(vertical?1:2))set('LayoutAlign',['Top','Center','Bottom','Stretch'].indexOf(vertical?v:({Left:'Top',Right:'Bottom'}[v]??v)),p);
+          // StackPanel gives each child its measured extent on the main axis;
+          // there is no spare main-axis slot for alignment to redistribute.
+          else if(winui&&mode===(vertical?2:1))continue;
           else throw new Error(key+' requires a Grid or a matching StackPanel cross axis.');
         }
         else throw new Error('No faithful VB6 lowering exists for '+node.type.name+'.'+key+'.');
@@ -340,6 +394,7 @@ export function compileFormXaml(text, {form:previous,settings={},schema=createVb
       if(type==='ComboBox'&&!values.IsEditable)set('Style',mac&&node.type.name==='ComboBox'?0:2);
       if(mac&&node.type.name==='PopUpButton'&&target.properties.Style!==2)error('PopUpButton is not editable; use macOS ComboBox for editable text.',values.IsEditable?.source??node.source);
       if(mac&&node.type.name==='SecureField'&&!target.properties.PasswordChar)error('SecureField requires a nonempty PasswordChar.',values.PasswordChar?.source??node.source);
+      if(mac&&node.type.name==='SegmentedControl'&&!values.Segments)error('SegmentedControl requires at least one Segment.',node.source);
       if(mac&&target.properties.MacOSControlStyle==='switch'&&![0,1].includes(target.properties.Value))error('A macOS switch supports on/off state only; use CheckBox for an indeterminate value.',node.source);
       if(mac&&node.type.name==='TabView') {
         if(!values.Items)error('TabView requires at least one TabItem.',node.source);
@@ -373,11 +428,20 @@ export function compileFormXaml(text, {form:previous,settings={},schema=createVb
       if(!Array.isArray(order)||order.some(k=>typeof k!=='string')||new Set(order).size!==order.length)error('Invalid native property order metadata.',node.source);
       else target.properties=Object.fromEntries([...order.filter(k=>Object.hasOwn(target.properties,k)),...Object.keys(target.properties).filter(k=>!order.includes(k))].map(k=>[k,target.properties[k]]));
     }
-    // Native property overrides on a WinUI object are explicit, and take precedence.
-    if (!native) {clearMacOS26ColorRoles(target.properties,extraProperties);Object.assign(target.properties,extraProperties);}
+    if(winui&&!Object.hasOwn(extraProperties,'WinUI3'))try {
+      const states=winui3StateResources(node,winuiAppearance,statics,scopes);
+      if(states)winuiAppearance.states=states;
+    }catch(e){error(e.message,node.source,'VBXAML2701');}
+    // Native property overrides on a WinUI object are explicit, and take
+    // precedence over both resting presentation and generated visual states.
+    if (!native) {clearMacOS26ColorRoles(target.properties,extraProperties);clearWinUI3Overrides(target.properties,extraProperties);Object.assign(target.properties,extraProperties);}
     try{validateMacOS26Properties(target.properties,type);}catch(e){error(e.message,node.source,'VBXAML2601');}
+    try{validateWinUI3Properties(target.properties,type);}catch(e){error(e.message,node.source,'VBXAML2701');}
     for (const p of deferred) {
-      const event=macOS26Event(node,propertyName(p.member))??nativeEvent[propertyName(p.member)],expected=(root?'Form':name)+'_'+event;
+      if(winuiSource&&['Checked','Unchecked','Indeterminate'].includes(propertyName(p.member))) {
+        error('WinUI '+propertyName(p.member)+' requires state-filtered routed-event dispatch. Use the native '+name+'_Click event and inspect Value; an unconditional Click alias would change the event semantics.',p.source,'VBXAML2701');continue;
+      }
+      const event=winui3Event(node,propertyName(p.member))??macOS26Event(node,propertyName(p.member))??nativeEvent[propertyName(p.member)],expected=(root?'Form':name)+'_'+event;
       if(!event||p.value.kind!=='Literal'||p.value.value.toLowerCase()!==expected.toLowerCase())error('Use the VB6 event method '+expected+'; arbitrary handler forwarding is not silently generated.',p.source);
     }
     // Count each flat native node once before adding it or descending further.

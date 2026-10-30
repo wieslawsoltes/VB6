@@ -1,5 +1,7 @@
 // GTK widgets and the VB control property/method boundary. MIT.
 #include "gtk.hpp"
+#include "gtk-richtext.hpp"
+#include "gtk-services.hpp"
 #include <fstream>
 
 namespace vb6 {
@@ -41,7 +43,7 @@ GdkRGBA gtkColor(int64_t input) {
     const uint32_t system[]={0xc8c8c8,0x000000,0xd77800,0xb4b4b4,0xf0f0f0,0xffffff,0x646464,0x000000,0x000000,0x000000,0xb4b4b4,0xb4b4b4,0xababab,0xd77800,0xffffff,0xf0f0f0,0xa0a0a0,0x6d6d6d,0x000000,0x000000,0xffffff,0x696969,0xe3e3e3,0x000000,0xe1ffff};
     value=(value&255)<std::size(system)?system[value&255]:0xf0f0f0;
   }
-  return {double(value&255)/255,double((value>>8)&255)/255,double((value>>16)&255)/255,1};
+  GdkRGBA color; color.red=double(value&255)/255; color.green=double((value>>8)&255)/255; color.blue=double((value>>16)&255)/255; color.alpha=1; return color;
 }
 int32_t gtkColorValue(const GdkRGBA& color) {
   auto byte=[](double n){return uint32_t(std::lround(std::clamp(n,0.0,1.0)*255));};
@@ -75,7 +77,7 @@ GtkWidget* GtkControl::editor() const {
 Text GtkControl::editText() const {
   auto* edit=editor();
   if(GTK_IS_ENTRY(edit))return fromUTF8(gtk_entry_get_text(GTK_ENTRY(edit)));
-  if(GTK_IS_TEXT_VIEW(edit)) {auto* buffer=gtk_text_view_get_buffer(GTK_TEXT_VIEW(edit));GtkTextIter first,last;gtk_text_buffer_get_bounds(buffer,&first,&last);auto* text=gtk_text_buffer_get_text(buffer,&first,&last,TRUE);auto value=fromUTF8(text);g_free(text);return value;}
+  if(GTK_IS_TEXT_VIEW(edit)) {auto* buffer=gtk_text_view_get_buffer(GTK_TEXT_VIEW(edit));GtkTextIter first,last;gtk_text_buffer_get_bounds(buffer,&first,&last);auto* text=richText?gtk_text_buffer_get_slice(buffer,&first,&last,TRUE):gtk_text_buffer_get_text(buffer,&first,&last,TRUE);auto value=fromUTF8(text);g_free(text);return value;}
   return property("text",Value::string(u"")).string();
 }
 std::pair<size_t,size_t> GtkControl::editSelection() const {
@@ -89,8 +91,10 @@ void GtkControl::editSelect(size_t start,size_t length) {
   int first=charOffset(text,start),last=charOffset(text,start+length);
   if(GTK_IS_ENTRY(edit))gtk_editable_select_region(GTK_EDITABLE(edit),first,last);
   else {auto* buffer=gtk_text_view_get_buffer(GTK_TEXT_VIEW(edit));GtkTextIter a,b;gtk_text_buffer_get_iter_at_offset(buffer,&a,first);gtk_text_buffer_get_iter_at_offset(buffer,&b,last);gtk_text_buffer_select_range(buffer,&b,&a);}
+  if(richText)gtkRichSelectionChanged(*this);
 }
 void GtkControl::editSetText(const Text& text,bool fire) {
+  if(richText){gtkRichSetPlain(*this,text,true,fire);return;}
   auto prior=editText();auto value=text;auto limit=number("maxlength",0);if(limit>0&&value.size()>size_t(limit))value.resize(size_t(limit));
   auto utf8=toUTF8(value);auto* edit=editor();
   {GtkEventSuppression guard(*this);if(GTK_IS_ENTRY(edit))gtk_entry_set_text(GTK_ENTRY(edit),utf8.c_str());else if(GTK_IS_TEXT_VIEW(edit))gtk_text_buffer_set_text(gtk_text_view_get_buffer(GTK_TEXT_VIEW(edit)),utf8.c_str(),int(utf8.size()));}
@@ -127,9 +131,13 @@ void GtkControl::initialize() {
   properties["name"]=Value::string(fromUTF8(spec.name));if(spec.index>=0)properties["index"]=Value::integer(spec.index,Type::Integer);
   const auto& type=spec.type;auto caption=gtkCaption(property("caption",Value::string(fromUTF8(spec.name))).string());
   if(type=="Menu") {
+#if GTK_MAJOR_VERSION >= 4
+    handle=host->handles.add(self(),HandleKind::Menu);return;
+#else
     auto text=property("caption",Value::string(u"")).string();menu=text==u"-"?gtk_separator_menu_item_new():gtk_check_menu_item_new_with_mnemonic(caption.c_str());
     g_object_ref_sink(menu);view=menu;widget=menu;watchDestruction(view,self());handle=host->handles.add(self(),HandleKind::Menu);
     gtkSignal(menu,"activate",G_CALLBACK(+[](GtkMenuItem*,gpointer data){gtkEvent(data,[](GtkControl& c){c.event("click");});}),self());refresh();return;
+#endif
   }
   if(type=="Timer"||type=="CommonDialog"||type=="ImageList") {
     handle=host->handles.add(self(),HandleKind::Control);if(type=="Timer")timerChanged();if(type=="ImageList")items("listimages");return;
@@ -137,15 +145,20 @@ void GtkControl::initialize() {
   if(type=="CommandButton")widget=gtk_button_new_with_mnemonic(caption.c_str());
   else if(type=="CheckBox")widget=gtk_check_button_new_with_mnemonic(caption.c_str());
   else if(type=="OptionButton") {
+#if GTK_MAJOR_VERSION >= 4
+    widget=gtk_check_button_new_with_mnemonic(caption.c_str());
+    if(auto object=owner.lock())for(auto& peer:gtkFormControls(object))if(peer->spec.type=="OptionButton"&&peer->spec.parent==spec.parent){gtk_check_button_set_group(GTK_CHECK_BUTTON(widget),GTK_CHECK_BUTTON(peer->widget));break;}
+#else
     GSList* group=nullptr;if(auto object=owner.lock())for(auto& peer:gtkFormControls(object))if(peer->spec.type=="OptionButton"&&peer->spec.parent==spec.parent) {group=gtk_radio_button_get_group(GTK_RADIO_BUTTON(peer->widget));break;}
     widget=gtk_radio_button_new_with_mnemonic(group,caption.c_str());
+#endif
   }
   else if(type=="Label") {view=gtk_event_box_new();widget=gtk_label_new_with_mnemonic(caption.c_str());gtk_container_add(GTK_CONTAINER(view),widget);gtk_widget_show(widget);gtk_label_set_xalign(GTK_LABEL(widget),0);}
   else if(type=="TextBox"&&!flag("multiline")) {widget=gtk_entry_new();auto password=property("passwordchar",Value::string(u"")).string();if(!password.empty()){gtk_entry_set_visibility(GTK_ENTRY(widget),FALSE);gtk_entry_set_invisible_char(GTK_ENTRY(widget),password[0]);}}
-  else if(type=="TextBox"||type=="RichTextBox") {view=gtk_scrolled_window_new(nullptr,nullptr);widget=gtk_text_view_new();gtk_container_add(GTK_CONTAINER(view),widget);gtk_widget_show(widget);auto scroll=int(number("scrollbars",2));gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(view),scroll&1?GTK_POLICY_AUTOMATIC:GTK_POLICY_NEVER,scroll&2?GTK_POLICY_AUTOMATIC:GTK_POLICY_NEVER);gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(widget),scroll&1?GTK_WRAP_NONE:GTK_WRAP_WORD_CHAR);}
+  else if(type=="TextBox"||type=="RichTextBox") {view=gtk_scrolled_window_new(nullptr,nullptr);widget=gtkNativeTextViewNew();gtk_container_add(GTK_CONTAINER(view),widget);gtk_widget_show(widget);auto scroll=int(number("scrollbars",2));gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(view),scroll&1?GTK_POLICY_AUTOMATIC:GTK_POLICY_NEVER,scroll&2?GTK_POLICY_AUTOMATIC:GTK_POLICY_NEVER);gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(widget),scroll&1?GTK_WRAP_NONE:GTK_WRAP_WORD_CHAR);}
   else if(type=="ComboBox"||type=="DriveListBox")widget=type=="DriveListBox"||number("style",0)==2?gtk_combo_box_text_new():gtk_combo_box_text_new_with_entry();
-  else if(type=="Frame") {widget=gtk_frame_new(caption.c_str());content=gtk_fixed_new();gtk_container_add(GTK_CONTAINER(widget),content);gtk_widget_show(content);}
-  else if(type=="Form"||type=="MDIForm"||type=="PictureBox") {widget=gtk_fixed_new();content=widget;}
+  else if(type=="Frame") {widget=gtk_frame_new(caption.c_str());content=gtkNativeFixedNew();gtk_container_add(GTK_CONTAINER(widget),content);gtk_widget_show(content);}
+  else if(type=="Form"||type=="MDIForm"||type=="PictureBox") {widget=gtkNativeFixedNew();content=widget;}
   else if(type=="Image"||type=="Line"||type=="Shape"||type=="MSChart")widget=gtk_drawing_area_new();
   else if(type=="ListBox"||type=="ListView"||type=="TreeView"||type=="FileListBox"||type=="DirListBox"||isGrid(*this)) {
     view=gtk_scrolled_window_new(nullptr,nullptr);widget=gtk_tree_view_new();gtk_container_add(GTK_CONTAINER(view),widget);gtk_widget_show(widget);
@@ -166,16 +179,27 @@ void GtkControl::initialize() {
   else if(type=="Toolbar")widget=gtk_toolbar_new();
   else if(type=="StatusBar")widget=gtk_box_new(GTK_ORIENTATION_HORIZONTAL,0);
   else fail(453,"GTK native control is not implemented: "+type);
-  if(!view)view=widget;g_object_ref_sink(view);markWidget(view,self());if(widget!=view)markWidget(widget,self());watchDestruction(view,self());
+  if(!view)view=widget;g_object_ref_sink(view);markWidget(view,self());if(widget!=view)markWidget(widget,self());
+#if GTK_MAJOR_VERSION >= 4
+  if(content&&content!=widget)markWidget(content,self());
+#endif
+  watchDestruction(view,self());
   handle=host->handles.add(self(),type=="Form"||type=="MDIForm"?HandleKind::Window:HandleKind::Control);
   gtk_widget_set_name(widget,("vb6-"+spec.name).c_str());
-  if(GTK_IS_BUTTON(widget))gtkSignal(widget,GTK_IS_TOGGLE_BUTTON(widget)?"toggled":"clicked",G_CALLBACK(+[](GtkButton*,gpointer data){gtkEvent(data,[](GtkControl& c){c.changed(GTK_IS_TOGGLE_BUTTON(c.widget)?"value":"click");});}),self());
+  if(type=="RichTextBox")gtkRichInitialize(*this);
+  if(GTK_IS_BUTTON(widget)||gtkNativeToggle(widget))gtkSignal(widget,gtkNativeToggle(widget)?"toggled":"clicked",G_CALLBACK(+[](GtkButton*,gpointer data){gtkEvent(data,[](GtkControl& c){c.changed(gtkNativeToggle(c.widget)?"value":"click");});}),self());
   if(auto* edit=editor()) {
     if(GTK_IS_ENTRY(edit))gtkSignal(edit,"changed",G_CALLBACK(+[](GtkEditable*,gpointer data){gtkEvent(data,[](GtkControl& c){c.changed("text");});}),self());
-    else gtkSignal(gtk_text_view_get_buffer(GTK_TEXT_VIEW(edit)),"changed",G_CALLBACK(+[](GtkTextBuffer*,gpointer data){gtkEvent(data,[](GtkControl& c){c.changed("text");});}),self());
+    else if(type!="RichTextBox")gtkSignal(gtk_text_view_get_buffer(GTK_TEXT_VIEW(edit)),"changed",G_CALLBACK(+[](GtkTextBuffer*,gpointer data){gtkEvent(data,[](GtkControl& c){c.changed("text");});}),self());
   }
   if(GTK_IS_COMBO_BOX(widget))gtkSignal(widget,"changed",G_CALLBACK(+[](GtkComboBox*,gpointer data){gtkEvent(data,[](GtkControl& c){c.changed("listindex");});}),self());
-  if(GTK_IS_RANGE(widget)||GTK_IS_SPIN_BUTTON(widget))gtkSignal(widget,"value-changed",G_CALLBACK(+[](GtkWidget*,gpointer data){gtkEvent(data,[](GtkControl& c){c.changed("value");});}),self());
+  if(gtkNativeRange(widget)||GTK_IS_SPIN_BUTTON(widget)){
+    gpointer target=widget;
+#if GTK_MAJOR_VERSION >= 4
+    if(GTK_IS_SCROLLBAR(widget))target=gtk_scrollbar_get_adjustment(GTK_SCROLLBAR(widget));
+#endif
+    gtkSignal(target,"value-changed",G_CALLBACK(+[](gpointer,gpointer data){gtkEvent(data,[](GtkControl& c){c.changed("value");});}),self());
+  }
   if(GTK_IS_CALENDAR(widget))gtkSignal(widget,"day-selected",G_CALLBACK(+[](GtkCalendar*,gpointer data){gtkEvent(data,[](GtkControl& c){c.changed("value");});}),self());
   if(GTK_IS_NOTEBOOK(widget)) {
     gtkSignal(widget,"switch-page",G_CALLBACK(+[](GtkNotebook*,GtkWidget*,guint page,gpointer data){gtkEvent(data,[&](GtkControl& c){if(c.suppressEvents)return;auto prior=c.property("tab",Value::integer(0));c.properties["tab"]=Value::integer(page,Type::Integer);c.event("click",c.spec.type=="SSTab"?Args{Arg(prior)}:Args{});});}),self());
@@ -184,26 +208,35 @@ void GtkControl::initialize() {
   }
   if(type=="Toolbar")items("buttons");if(type=="StatusBar")items("panels");
   if(type=="MSChart")resizeGrid(size_t(number("rowcount",5)),size_t(number("columncount",1)));
-  if(content||type=="Image"||type=="Line"||type=="Shape"||type=="MSChart")gtkSignal(widget,"draw",G_CALLBACK(+[](GtkWidget*,cairo_t* cr,gpointer data)->gboolean {gtkEvent(data,[&](GtkControl& c){gtkDraw(c,cr);});return FALSE;}),self());
+  if(content||type=="Image"||type=="Line"||type=="Shape"||type=="MSChart")gtkNativeConnectDrawing(*this);
   gtkConnectInput(*this);
+  gtkConnectMousePointer(*this);
   auto initial=property("list");if(initial.type==Type::Array)for(auto& value:initial.asArray()->values)list.push_back(value.string());itemData.resize(list.size());
   if(type=="DriveListBox"||type=="DirListBox"||type=="FileListBox")reloadFiles();
   refresh();applyFrame();applyFont();
+  if(type=="RichTextBox"&&properties.count("textrtf")){GtkEventSuppression guard(*this);gtkRichSet(*this,"textrtf",property("textrtf"));}
 }
 void GtkControl::refresh() {
   if(disposed)return;GtkEventSuppression guard(*this);
+#if GTK_MAJOR_VERSION >= 4
+  if(spec.type=="Menu"){auto value=form();if(value->menuModel&&!value->rebuildingMenus)host->rebuildMenus(value);return;}
+#else
   if(menu) {if(GTK_IS_CHECK_MENU_ITEM(menu)){gtk_menu_item_set_label(GTK_MENU_ITEM(menu),gtkCaption(property("caption",Value::string(u"")).string()).c_str());gtk_menu_item_set_use_underline(GTK_MENU_ITEM(menu),TRUE);gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(menu),flag("checked"));}gtk_widget_set_sensitive(menu,flag("enabled",true));gtk_widget_set_visible(menu,flag("visible",true));return;}
+#endif
   if(!view)return;
   gtk_widget_set_visible(view,flag("visible",true));gtk_widget_set_sensitive(view,flag("enabled",true));
   gtk_widget_set_tooltip_text(view,toUTF8(property("tooltiptext",Value::string(u"")).string()).c_str());
   auto caption=gtkCaption(property("caption",Value::string(fromUTF8(spec.name))).string());
   if(GTK_IS_BUTTON(widget))gtk_button_set_label(GTK_BUTTON(widget),caption.c_str());
+#if GTK_MAJOR_VERSION >= 4
+  if(GTK_IS_CHECK_BUTTON(widget))gtk_check_button_set_label(GTK_CHECK_BUTTON(widget),caption.c_str());
+#endif
   if(GTK_IS_BUTTON(widget)) {
     auto value=property(!flag("enabled",true)&&properties.count("disabledpicture")?"disabledpicture":"picture",Value::object(nullptr));
     auto picture=value.type==Type::Object?std::dynamic_pointer_cast<GtkPicture>(std::get<ObjectPtr>(value.payload)):nullptr;
     gtk_button_set_image(GTK_BUTTON(widget),picture&&picture->pixels?gtk_image_new_from_pixbuf(picture->pixels):nullptr);gtk_button_set_always_show_image(GTK_BUTTON(widget),picture!=nullptr);
   }
-  if(GTK_IS_TOGGLE_BUTTON(widget)){gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(widget),number("value")!=0);gtk_toggle_button_set_inconsistent(GTK_TOGGLE_BUTTON(widget),number("value")==2);}
+  if(gtkNativeToggle(widget)){gtkNativeToggleSet(widget,number("value")!=0,number("value")==2);}
   if(GTK_IS_LABEL(widget)){gtk_label_set_text_with_mnemonic(GTK_LABEL(widget),caption.c_str());gtk_label_set_xalign(GTK_LABEL(widget),number("alignment")==1?1:number("alignment")==2?0.5:0);gtk_label_set_line_wrap(GTK_LABEL(widget),flag("wordwrap",true));}
   if(GTK_IS_FRAME(widget))gtk_frame_set_label(GTK_FRAME(widget),gtkCaption(property("caption",Value::string(u"")).string(),false).c_str());
   if(auto* edit=editor()) {
@@ -211,9 +244,9 @@ void GtkControl::refresh() {
     if(GTK_IS_ENTRY(edit)){gtk_editable_set_editable(GTK_EDITABLE(edit),!flag("locked"));gtk_entry_set_alignment(GTK_ENTRY(edit),number("alignment")==1?1:number("alignment")==2?0.5:0);}
     else {gtk_text_view_set_editable(GTK_TEXT_VIEW(edit),!flag("locked"));gtk_text_view_set_justification(GTK_TEXT_VIEW(edit),number("alignment")==1?GTK_JUSTIFY_RIGHT:number("alignment")==2?GTK_JUSTIFY_CENTER:GTK_JUSTIFY_LEFT);}
   }
-  if(GTK_IS_RANGE(widget)||GTK_IS_SPIN_BUTTON(widget)||GTK_IS_PROGRESS_BAR(widget)) {
+  if(gtkNativeRange(widget)||GTK_IS_SPIN_BUTTON(widget)||GTK_IS_PROGRESS_BAR(widget)) {
     double minimum=number("min"),maximum=number("max",100),value=number("value",minimum);if(!std::isfinite(minimum)||!std::isfinite(maximum)||!std::isfinite(value)||maximum<minimum||value<minimum||value>maximum)fail(380,"Value is outside Min/Max");
-    if(GTK_IS_RANGE(widget)){gtk_range_set_range(GTK_RANGE(widget),minimum,maximum);gtk_range_set_increments(GTK_RANGE(widget),number("smallchange",1),number("largechange",10));gtk_range_set_value(GTK_RANGE(widget),value);}
+    if(gtkNativeRange(widget)){gtkNativeRangeSet(widget,minimum,maximum,value,number("smallchange",1),number("largechange",10));}
     if(GTK_IS_SPIN_BUTTON(widget)){gtk_spin_button_set_range(GTK_SPIN_BUTTON(widget),minimum,maximum);gtk_spin_button_set_value(GTK_SPIN_BUTTON(widget),value);}
     if(GTK_IS_PROGRESS_BAR(widget))gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(widget),maximum==minimum?0:(value-minimum)/(maximum-minimum));
   }
@@ -221,9 +254,7 @@ void GtkControl::refresh() {
   if(properties.count("forecolor")){auto color=gtkColor(number("forecolor"));gtk_widget_override_color(widget,GTK_STATE_FLAG_NORMAL,&color);}
   if(properties.count("backcolor")){auto color=gtkColor(number("backcolor"));gtk_widget_override_background_color(widget,GTK_STATE_FLAG_NORMAL,&color);}
   if(GTK_IS_COMBO_BOX(widget)||GTK_IS_TREE_VIEW(widget))reloadList();
-  auto pointer=int(number("mousepointer"));auto* window=gtk_widget_get_window(view);if(window){const char* cursor=pointer==2?"crosshair":pointer==3?"text":pointer==9?"move":pointer==11?"wait":pointer==10?"not-allowed":pointer==15?"pointer":"default";GdkCursor* value=nullptr;
-    if(pointer==99){auto image=property("mouseicon",Value::object(nullptr));auto picture=image.type==Type::Object?std::dynamic_pointer_cast<GtkPicture>(std::get<ObjectPtr>(image.payload)):nullptr;if(picture&&picture->pixels)value=gdk_cursor_new_from_pixbuf(gdk_window_get_display(window),picture->pixels,picture->hotspotX,picture->hotspotY);}
-    if(!value)value=gdk_cursor_new_from_name(gdk_window_get_display(window),cursor);gdk_window_set_cursor(window,value);if(value)g_object_unref(value);}
+  gtkApplyMousePointer(*this);
   gtk_widget_queue_draw(view);
 }
 void GtkControl::dispose() {
@@ -234,6 +265,11 @@ void GtkControl::dispose() {
   // Containers can destroy their descendants independently of VB Unload (for
   // example Tabs.Remove). Invalidate borrowed widget pointers before GTK's
   // recursive destruction, then release exactly the reference owned by us.
+  gtkRichDispose(*this);
+#if GTK_MAJOR_VERSION >= 4
+  if(menuAction){g_object_unref(menuAction);menuAction=nullptr;}
+  if(submenuModel){g_object_unref(submenuModel);submenuModel=nullptr;}
+#endif
   auto* owned=std::exchange(view,nullptr);widget=content=menu=nullptr;
   if(owned){if(!gtk_widget_in_destruction(owned))gtk_widget_destroy(owned);g_object_unref(owned);}
   if(model){g_object_unref(model);model=nullptr;}if(css){g_object_unref(css);css=nullptr;}
@@ -260,16 +296,17 @@ void GtkControl::changed(const std::string& name) {
   if(name=="text") {auto value=editText();auto maximum=number("maxlength");if(maximum>0&&value.size()>size_t(maximum)){value.resize(size_t(maximum));editSetText(value,false);}auto old=property("text",Value::string(u"")).string();properties["text"]=Value::string(value);if(old!=value)event("change");return;}
   if(name=="listindex") {auto index=gtk_combo_box_get_active(GTK_COMBO_BOX(widget));properties["listindex"]=Value::integer(index);selected.clear();if(index>=0)selected.insert(size_t(index));if(spec.type=="DriveListBox"&&index>=0)properties["drive"]=Value::string(list[size_t(index)]);event(spec.type=="DriveListBox"?"change":"click");return;}
   if(name=="value") {
-    if(GTK_IS_TOGGLE_BUTTON(widget)) {auto value=gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));gtk_toggle_button_set_inconsistent(GTK_TOGGLE_BUTTON(widget),FALSE);properties["value"]=Value::integer(value?1:0,Type::Integer);if(spec.type=="OptionButton"&&!value)return;event("click");return;}
-    if(GTK_IS_RANGE(widget))properties["value"]=Value::integer(bankers(gtk_range_get_value(GTK_RANGE(widget))));
+    if(gtkNativeToggle(widget)) {auto value=gtkNativeToggleActive(widget);gtkNativeToggleSet(widget,value,false);properties["value"]=Value::integer(value?1:0,Type::Integer);if(spec.type=="OptionButton"&&!value)return;event("click");return;}
+    if(gtkNativeRange(widget))properties["value"]=Value::integer(bankers(gtkNativeRangeValue(widget)));
     else if(GTK_IS_SPIN_BUTTON(widget))properties["value"]=Value::integer(gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(widget)));
     else if(GTK_IS_CALENDAR(widget)){guint y,m,d;gtk_calendar_get_date(GTK_CALENDAR(widget),&y,&m,&d);properties["value"]=civilDate({int(y),int(m+1),int(d),0,0,0});}
-    event("change");if(GTK_IS_RANGE(widget))event("scroll");return;
+    event("change");if(gtkNativeRange(widget))event("scroll");return;
   }
   event(name);
 }
 Value GtkControl::get(Runtime& rt,const std::string& raw) {
   if(disposed||hostLife.expired())fail(91,"Control has been unloaded");auto name=lower(raw.empty()?defaultMember():raw);
+  if(gtkRichProperty(name))return gtkRichGet(*this,name);
   if(name=="handle"||name=="hwnd")return Value::integer(handle);
   if(name=="font")return gtkFont(self());
   if(name=="container"||name=="parent"){auto object=owner.lock();if(!object)fail(91);return spec.parent.empty()?Value::object(object):object->get(rt,spec.parent);}
@@ -309,11 +346,12 @@ Value GtkControl::get(Runtime& rt,const std::string& raw) {
 }
 void GtkControl::set(Runtime& rt,const std::string& raw,Value value,bool) {
   if(disposed||hostLife.expired())fail(91);auto name=lower(raw.empty()?defaultMember():raw);
+  if(gtkRichProperty(name)){gtkRichSet(*this,name,std::move(value));return;}
   if(name=="value"&&GTK_IS_CALENDAR(widget))value=parseDate(value);
   if(name=="name"||name=="index"||name=="hwnd"||name=="handle"||name=="listcount")fail(383);
   if(name=="datasource"&&isGrid(*this)){bindRecordset(std::move(value));return;}
   if(name=="font"){auto font=value.asObject();for(auto& field:std::map<std::string,std::string>{{"name","fontname"},{"size","fontsize"},{"bold","fontbold"},{"italic","fontitalic"},{"underline","fontunderline"},{"strikethrough","fontstrikethru"}})set(rt,field.second,font->get(rt,field.first));return;}
-  if(name=="selstart"||name=="sellength"||name=="seltext") {auto selection=editSelection();if(name=="seltext"){auto text=editText(),insert=value.string();text.replace(selection.first,selection.second,insert);editSetText(text);editSelect(selection.first+insert.size(),0);}else{auto n=value.integral();if(n<0)fail(380);editSelect(name=="selstart"?size_t(n):selection.first,name=="sellength"?size_t(n):0);}return;}
+  if(name=="selstart"||name=="sellength"||name=="seltext") {auto selection=editSelection();if(name=="seltext"){if(richText){gtkRichSetPlain(*this,value.string(),false);return;}auto text=editText(),insert=value.string();text.replace(selection.first,selection.second,insert);editSetText(text);editSelect(selection.first+insert.size(),0);}else{auto n=value.integral();if(n<0)fail(380);editSelect(name=="selstart"?size_t(n):selection.first,name=="sellength"?size_t(n):0);}return;}
   if(name=="text"&&editor()){editSetText(value.string());return;}
   if(name=="text"&&isGrid(*this)){writeCell(size_t(number("row")),size_t(number("col")),value);return;}
   if(name=="listindex"){auto n=value.integral();if(n< -1||n>=int64_t(list.size()))fail(380);auto prior=number("listindex",-1);properties[name]=Value::integer(n);selected.clear();if(n>=0)selected.insert(size_t(n));reloadList();if(editor()&&n>=0)editSetText(list[size_t(n)]);if(prior!=n)event("click");return;}
@@ -323,8 +361,9 @@ void GtkControl::set(Runtime& rt,const std::string& raw,Value value,bool) {
   if(name=="tab"&&GTK_IS_NOTEBOOK(widget)){auto n=value.integral();range(n,items("tabs")->values.size());gtk_notebook_set_current_page(GTK_NOTEBOOK(widget),int(n));properties[name]=Value::integer(n,Type::Integer);return;}
   if(name=="selecteditem") {auto item=std::dynamic_pointer_cast<GtkItem>(value.asObject());if(!item||item->owner.lock().get()!=this)fail(380);if(GTK_IS_NOTEBOOK(widget)){gtk_notebook_set_current_page(GTK_NOTEBOOK(widget),int(item->get(rt,"index").integral()-1));return;}auto found=treePaths.find(item->identity);if(found==treePaths.end())fail(380);auto* path=gtk_tree_path_new_from_string(found->second.c_str());gtk_tree_view_expand_to_path(GTK_TREE_VIEW(widget),path);gtk_tree_view_set_cursor(GTK_TREE_VIEW(widget),path,nullptr,FALSE);gtk_tree_path_free(path);return;}
   if(name=="currentx"||name=="currenty"){if(name=="currentx")currentX=value.floating();else currentY=value.floating();return;}
-  if(name=="picture"||name=="icon"||name=="mouseicon"||name=="disabledpicture"||name=="downpicture"){if(value.type!=Type::Object)fail(13);auto object=std::get<ObjectPtr>(value.payload);auto picture=std::dynamic_pointer_cast<GtkPicture>(object);if(object&&!picture)fail(13);properties[name]=value;
-    if((name=="icon")&&(spec.type=="Form"||spec.type=="MDIForm"))gtk_window_set_icon(GTK_WINDOW(form()->window),picture?picture->pixels:nullptr);
+  if(name=="picture"||name=="icon"||name=="mouseicon"||name=="disabledpicture"||name=="downpicture"){if(value.type!=Type::Object)fail(13);auto object=std::get<ObjectPtr>(value.payload);auto picture=std::dynamic_pointer_cast<GtkPicture>(object);if(object&&!picture)fail(13);
+    if((name=="icon")&&(spec.type=="Form"||spec.type=="MDIForm")){gtkNativeRequireX11(form()->window,"Form.Icon");gtk_window_set_icon(GTK_WINDOW(form()->window),picture?picture->pixels:nullptr);}
+    properties[name]=value;
     if(name=="picture"&&picture&&picture->pixels&&((spec.type=="Image"&&!flag("stretch"))||(spec.type=="PictureBox"&&flag("autosize")))){properties["width"]=Value::real(gdk_pixbuf_get_width(picture->pixels)*15);properties["height"]=Value::real(gdk_pixbuf_get_height(picture->pixels)*15);applyFrame();}
     refresh();return;}
   const std::set<std::string> supported={"caption","text","left","top","width","height","visible","enabled","tag","tooltiptext","backcolor","forecolor","fontname","fontsize","fontbold","fontitalic","fontunderline","fontstrikethru","alignment","locked","maxlength","value","min","max","smallchange","largechange","increment","interval","checked","tabindex","tabstop","scalemode","scaleleft","scaletop","scalewidth","scaleheight","drawstyle","drawmode","drawwidth","fillcolor","fillstyle","bordercolor","borderwidth","shape","borderstyle","stretch","sorted","multiselect","gridlines","fullrowselect","fixedrows","fixedcols","rowsel","colsel","simpletext","style","filter","filterindex","filename","dialogtitle","initdir","defaultext","flags","cancelerror","path","pattern","drive","redraw","mousepointer","color","fontcharset","anchor","dock","autoredraw","keypreview"};
@@ -345,7 +384,7 @@ void GtkControl::set(Runtime& rt,const std::string& raw,Value value,bool) {
   }catch(...){properties[name]=previous;throw;}
   if(name=="value"&&previous.number()!=value.number()) {
     if(spec.type=="CheckBox"||(spec.type=="OptionButton"&&value.truth()))event("click");
-    else if(GTK_IS_RANGE(widget)||GTK_IS_SPIN_BUTTON(widget)||GTK_IS_CALENDAR(widget))event("change");
+    else if(gtkNativeRange(widget)||GTK_IS_SPIN_BUTTON(widget)||GTK_IS_CALENDAR(widget))event("change");
   }
 }
 Ref GtkControl::reference(Runtime& rt,const std::string& raw,Args args) {
@@ -359,6 +398,7 @@ Ref GtkControl::reference(Runtime& rt,const std::string& raw,Args args) {
 }
 Value GtkControl::invoke(Runtime& rt,const std::string& raw,Args args) {
   if(disposed||hostLife.expired())fail(91);bool put=raw.rfind("let:",0)==0||raw.rfind("set:",0)==0;auto name=lower(put?raw.substr(4):raw);if(name.empty())name=defaultMember();
+  if(spec.type=="RichTextBox"&&gtkRichMethod(name))return gtkRichCall(*this,name,std::move(args),put);
   if(!put&&(name=="nodes"||name=="listitems"||name=="columnheaders"||name=="buttons"||name=="panels"||name=="listimages"||(name=="tabs"&&spec.type!="SSTab")))return args.empty()?Value::object(items(name)):items(name)->invoke(rt,"item",std::move(args));
   if(name=="list"||name=="itemdata"||name=="selected") {if(args.size()!=(put?2:1))fail(450);auto n=args[0].value.integral();range(n,list.size());auto i=size_t(n);if(put){if(name=="list")list[i]=args[1].value.string();else if(name=="itemdata")itemData[i]=int32_t(coerce(args[1].value,"long").integral());else if(args[1].value.truth()){if(!flag("multiselect"))selected.clear();selected.insert(i);}else selected.erase(i);reloadList();return {};}return name=="list"?Value::string(list[i]):name=="itemdata"?Value::integer(itemData[i]):Value::boolean(selected.count(i));}
   if(name=="textmatrix"||name=="textarray") {auto count=name=="textmatrix"?2u:1u;if(args.size()!=count+(put?1u:0u))fail(450);auto columns=grid.empty()?0:grid[0].size();if(!columns)fail(381);auto row=name=="textmatrix"?args[0].value.integral():args[0].value.integral()/int64_t(columns),col=name=="textmatrix"?args[1].value.integral():args[0].value.integral()%int64_t(columns);range(row,grid.size());range(col,columns);if(put){writeCell(size_t(row),size_t(col),args[count].value);return {};}return Value::string(grid[size_t(row)][size_t(col)]);}
@@ -370,7 +410,13 @@ Value GtkControl::invoke(Runtime& rt,const std::string& raw,Args args) {
   if(name=="setfocus") {if(!widget||!gtk_widget_get_sensitive(widget)||!gtk_widget_get_visible(view))fail(5);gtk_widget_grab_focus(editor()?editor():widget);return {};}
   if(name=="refresh"){if(view)gtk_widget_queue_draw(view);host->pump();return {};}
   if(name=="move") {if(args.size()<2||args.size()>4)fail(450);const char* names[]={"left","top","width","height"};for(size_t i=0;i<args.size();++i)if(args[i].value.type!=Type::Missing)properties[names[i]]=args[i].value;applyFrame();return {};}
-  if(name=="zorder") {auto n=integerArgument(args,0);if(n<0||n>1)fail(5);auto* window=view?gtk_widget_get_window(view):nullptr;if(window){if(n)gdk_window_lower(window);else gdk_window_raise(window);}return {};}
+  if(name=="zorder") {auto n=integerArgument(args,0);if(n<0||n>1)fail(5);
+#if GTK_MAJOR_VERSION >= 4
+    if(view)if(auto* parent=gtk_widget_get_parent(view)){if(n)gtk_widget_insert_after(view,parent,nullptr);else gtk_widget_insert_before(view,parent,nullptr);gtk_widget_queue_draw(parent);}
+#else
+    auto* window=view?gtk_widget_get_window(view):nullptr;if(window){if(n)gdk_window_lower(window);else gdk_window_raise(window);}
+#endif
+    return {};}
   if(name=="click"){event("click");return {};}
   if(name=="cls"){drawings.clear();currentX=currentY=0;if(view)gtk_widget_queue_draw(view);return {};}
   if(name=="print")return gtkPrint(*this,std::move(args));

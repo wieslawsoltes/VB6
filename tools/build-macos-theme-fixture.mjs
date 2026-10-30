@@ -36,9 +36,9 @@ add('segmented-control','TabStrip',{Tabs:[{Caption:'First'},{Caption:'Second'},{
 add('slider','Slider',{Min:0,Max:100,Value:50});
 add('progress','ProgressBar',{Min:0,Max:100,Value:50});
 add('date-picker','DTPicker',{Value:'2026-01-01'});
-// VB6 has no NSSearchField intrinsic: a real TextBox is reported as an adapter
-// gap, not secretly replaced with capture-only search-field artwork.
-add('search-field','TextBox',{Text:''});
+// Exercise the public search appearance contract used by real compiled forms.
+// The retained TextBox owns editing/IME and the same shared clear affordance.
+add('search-field','TextBox',{Text:'',MacOSControlStyle:'search'});
 add('group-box','Frame',{Caption:'Group'},80);
 add('rich-text','RichTextBox',{Text:'Styled text\nA second line\nA third line'},80);
 add('table-view','ListView',{Columns:[{Key:'name',Text:'Name',Width:2010},{Key:'state',Text:'State',Width:2010}],Items:[{Key:'palette',Text:'Palette',SubItems:['Ready']},{Key:'control',Text:'Control',SubItems:['Selected']},{Key:'window',Text:'Window',SubItems:['Active']}]},80);
@@ -46,4 +46,4 @@ add('tab-view','SSTab',{Tabs:[{Caption:'First'},{Caption:'Second'}],TabHeight:36
 add('separator','Line',{BorderColor:-2147483632},1);
 add('stepper','UpDown',{Min:0,Max:10,Value:5});
 fs.writeFileSync(new URL('fixture.html',root),exportApplication(project,{persist:false}));
-fs.writeFileSync(new URL('fixture.json',root),JSON.stringify({schema:1,width:980,height:840,specimens,adaptationGaps:['search-field: VB6 TextBox does not expose NSSearchField affordances','date-picker: HTML date entry follows browser locale and native picker','window: browser frame keeps authored VB6 non-client compatibility geometry']},null,2)+'\n');
+fs.writeFileSync(new URL('fixture.json',root),JSON.stringify({schema:1,width:980,height:840,specimens,adaptationGaps:['date-picker: HTML date entry follows browser locale and native picker','window: browser frame keeps authored VB6 non-client compatibility geometry']},null,2)+'\n');

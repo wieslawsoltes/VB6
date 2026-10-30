@@ -1,9 +1,11 @@
 import {LayoutEngine} from '../../packages/auto-layout/src/index.js';
-import {layoutNode,parentIds,layoutOptions,layoutSettings,layoutInsets} from './model.js';
+import {layoutNode,parentIds,layoutOptions,layoutSettings,layoutInsets,getWinUI3LayoutValues,setWinUI3LayoutValues} from './model.js';
 import {layoutEligible,layoutContainer,layoutProperty,setLayoutProperty,layoutKey} from './contract.js';
 import {clearLayoutMeasurements} from './measurement.js';
+import {clearWinUI3Overrides} from '../theme/winui3-compat.js';
 const geometry=new Set(['Left','Top','Width','Height','Anchor','Dock']);
 const typography=/^(Text|Caption|FontName|FontSize|FontBold|FontItalic|MultiLine|BorderStyle|Appearance)$/;
+const padding=/^LayoutPadding(?:Top|Right|Bottom|Left)?$/;
 
 /** Applies only the opted-in container's authoring preferences; it never changes
  * the application's colors, fonts, or IDE theme. */
@@ -32,15 +34,27 @@ export class FormLayout {
    * layouts intentionally defer cross-property resolution until ResumeLayout. */
   setProperty(control,key,value){
     value=layoutProperty(key,value,control.props);
-    if(value===control.props[key]&&key!=='Anchor'&&key!=='Dock')return;
+    const appearance=control.props.WinUI3,releasePadding=padding.test(key)&&appearance&&
+      (Object.hasOwn(appearance.properties??{},'Padding')||Object.hasOwn(appearance.resources??{},'Padding'));
+    if(value===control.props[key]&&key!=='Anchor'&&key!=='Dock'&&!releasePadding)return;
     if(this.disposed){setLayoutProperty(control,key,value);return;}
     if(this.propertyTransaction||this.applying||this.engine.solving)throw new Error('Reentrant layout property mutation');
     const tx={props:new Map(),records:new Map(),root:this.engine.options,orderDirty:this.orderDirty};this.propertyTransaction=tx;
+    const presentation=releasePadding?getWinUI3LayoutValues(control.props):null;
     this.captureProperty(control,key);if(key==='Anchor')this.captureProperty(control,'Dock');if(key==='Dock')this.captureProperty(control,'Anchor');
-    try{setLayoutProperty(control,key,value);this.edit(control,key);}
+    try{
+      if(releasePadding){
+        this.captureProperty(control,'WinUI3');control.props.WinUI3=structuredClone(appearance);
+        clearWinUI3Overrides(control.props,{[key]:value});
+        if(presentation){const {Padding,...rest}=presentation;setWinUI3LayoutValues(control.props,rest);}
+      }
+      setLayoutProperty(control,key,value);this.edit(control,key);
+      if(releasePadding)control.invalidate?.();
+    }
     catch(error){
       this.propertyTransaction=null;
       for(const [view,values]of tx.props)for(const [property,old]of values)if(old.present)view.props[property]=old.value;else delete view.props[property];
+      if(releasePadding)setWinUI3LayoutValues(control.props,presentation);
       try{
         this.engine.configure({...layoutSettings(this.form.props),width:tx.root.width,height:tx.root.height});
         for(const [id,record]of tx.records){this.engine.update(id,record);this.records.set(id,record);}

@@ -10,6 +10,7 @@ import {compileMacOSAOT,emitAOTPortableTestSource} from '../packages/macos-nativ
 import {exportMacOSAOT,verifyMacOSAOTArchive} from '../packages/macos-native/src/aot-export.js';
 import {recordsetProject} from '../packages/macos-native/tests/recordsets.mjs';
 import {macOSDataSampleProject} from './macos-data-sample-fixture.mjs';
+import {macOS26NativeSampleProject,MACOS26_NATIVE_SAMPLE_MARKER} from './macos26-native-sample.mjs';
 import {resourceFormProject} from '../packages/macos-native/tests/resources.mjs';
 import {conformanceProject} from '../packages/macos-native/tests/conformance.mjs';
 import {programLifetimeProject,formLifetimeProject,abruptLifetimeProject} from '../packages/macos-native/tests/program-lifetime.mjs';
@@ -19,7 +20,7 @@ import {buildAOTTemplate} from './build-macos-aot-template.mjs';
 const root=path.resolve(import.meta.dirname,'..'),sdk=path.join(root,'packages/macos-native'),work=await fs.mkdtemp(path.join(os.tmpdir(),'vb6-direct-aot-'));
 const artifacts=path.join(root,'artifacts/macos-aot'),reports=path.join(root,'reports/macos-aot');
 let transcript='';const log=text=>{process.stderr.write(text);transcript+=text;if(transcript.length>16*1024*1024)transcript=transcript.slice(-16*1024*1024);};
-const report={platform:process.platform,arch:process.arch,portableOracleVerified:false,arm64ExecutionVerified:false,nativeSignatureVerified:false,checks:[]};
+const report={platform:process.platform,arch:process.arch,portableOracleVerified:false,arm64ExecutionVerified:false,nativeSignatureVerified:false,appearanceControlsVerified:false,segmentedControlsVerified:false,macOS26SampleVerified:false,checks:[]};
 const run=(exe,args,options={})=>runTool(exe,args,{cwd:work,timeout:180000,log,...options});
 const markersForResource=output=>{for(const marker of ['NATIVE_RESOURCES_OK','NATIVE_RESOURCE_FORM_OK'])assert.ok(output.includes(marker),marker);};
 const markers=output=>{for(const marker of ['NATIVE_RECORDSETS_OK','NATIVE_CONFORMANCE_OK','NATIVE_INTERFACES_OK','NATIVE_LIFETIMES_OK','NATIVE_ARRAYS_OK','NATIVE_SCOPES_OK','NATIVE_RESOURCES_OK'])assert.ok(output.includes(marker),'Missing '+marker);};
@@ -98,10 +99,11 @@ try{
     await run(compiler,['-std=c++17','-arch','arm64','-isysroot',await run('/usr/bin/xcrun',['--sdk','macosx','--show-sdk-path']),'-mmacosx-version-min=11.0','-fobjc-arc','-I',path.join(sdk,'native'),...uiSources,path.join(work,'cache',runtime.manifest.provenance.nativeRuntimeSha256,'libvb6-native.a'),'-framework','AppKit','-framework','Foundation','-framework','CoreGraphics','-framework','QuartzCore','-o',ui]);
     await run('/usr/bin/codesign',['--sign','-','--timestamp=none',ui]);
     const uiOutput=await run(ui,[]);
-    for(const marker of ['APPKIT_RECORDSETS_OK','APPKIT_PICTURE_FRAMES_OK','APPKIT_PICTURES_OK','APPKIT_CONFORMANCE_OK','APPKIT_EDIT_SELECTION_LIST_OK','APPKIT_RICH_SELECTION_OK','APPKIT_APPEARANCE_OK'])assert.ok(uiOutput.includes(marker),marker);
+    for(const marker of ['APPKIT_RECORDSETS_OK','APPKIT_PICTURE_FRAMES_OK','APPKIT_PICTURES_OK','APPKIT_CONFORMANCE_OK','APPKIT_EDIT_SELECTION_LIST_OK','APPKIT_RICH_SELECTION_OK','APPKIT_APPEARANCE_OK','APPKIT_SEGMENTED_OK'])assert.ok(uiOutput.includes(marker),marker);
     report.recordsetControlsVerified=true;report.pictureControlsVerified=true;report.multiResolutionPicturesVerified=true;
-    report.appearanceControlsVerified=true;report.checks.push('Native macOS appearance, field-editor identity, semantic colors and material containers');
-    for(const optimization of [0,1,2,3])for(const [label,p,validate]of [['recordsets',recordsetProject(),output=>assert.ok(output.includes('NATIVE_RECORDSETS_OK'))],['original-data',macOSDataSampleProject(),output=>assert.ok(output.includes('NATIVE_ORIGINAL_DATA_OK'))],['conformance',project,markers],['richtext',richTextProject(),output=>assert.ok(output.includes('NATIVE_RICH_FORM_OK'))],['large',largeAOTProject(),output=>assert.ok(output.includes('NATIVE_LARGE_AOT_OK'))],['roots',programLifetimeProject(),rootMarkers],['abrupt',abruptLifetimeProject(),abruptMarkers],['forms',formLifetimeProject(),output=>assert.ok(output.includes('NATIVE_FORM_LIFETIME_OK'))],['resources',resourceFormProject(),output=>{markersForResource(output);}]] ){
+    report.appearanceControlsVerified=true;report.segmentedControlsVerified=true;report.checks.push('Native macOS appearance, field-editor identity, semantic colors and material containers','Native segmented controls, persistent pages and reentrant focus validation');
+    const macOS26Optimizations=[];
+    for(const optimization of [0,1,2,3])for(const [label,p,validate]of [['recordsets',recordsetProject(),output=>assert.ok(output.includes('NATIVE_RECORDSETS_OK'))],['original-data',macOSDataSampleProject(),output=>assert.ok(output.includes('NATIVE_ORIGINAL_DATA_OK'))],['macos26-sample',macOS26NativeSampleProject(),output=>assert.ok(output.includes(MACOS26_NATIVE_SAMPLE_MARKER),'Missing '+MACOS26_NATIVE_SAMPLE_MARKER)],['conformance',project,markers],['richtext',richTextProject(),output=>assert.ok(output.includes('NATIVE_RICH_FORM_OK'))],['large',largeAOTProject(),output=>assert.ok(output.includes('NATIVE_LARGE_AOT_OK'))],['roots',programLifetimeProject(),rootMarkers],['abrupt',abruptLifetimeProject(),abruptMarkers],['forms',formLifetimeProject(),output=>assert.ok(output.includes('NATIVE_FORM_LIFETIME_OK'))],['resources',resourceFormProject(),output=>{markersForResource(output);}]] ){
       const key=label+'-O'+optimization,options={optimization,name:p.name+(optimization===2?'':'-O'+optimization)};
       const result=await exportMacOSAOT(p,runtime,options);
       if(label==='large'){assert.ok(result.report.codeBytes>2097152,'Native large program must exceed old code cap');assert.ok(result.report.metadataBytes>2097152,'Native large program must exceed old metadata cap');}
@@ -112,12 +114,15 @@ try{
       // Crucially, do NOT invoke Clang on project source or re-sign with codesign.
       await run('/usr/bin/codesign',['--verify','--strict','--verbose=2',app]);
       validate(await run(executable,[]));
+      if(label==='macos26-sample')macOS26Optimizations.push(optimization);
       if(label==='roots')assert.deepEqual((await fs.readFile(path.join(work,'native-program-lifetime.txt'),'utf8')).trim().split(/\r?\n/).sort(),['array','global','static']);
       if(label==='abrupt')assert.equal(await fs.readFile(path.join(work,'native-program-lifetime.txt'),'utf8'),'');
       report.checks.push(key+': direct ARM64 code executed and app signature verified');
       report[key]={sha256:result.report.sha256,executableSha256:result.report.executableSha256,codeBytes:result.report.codeBytes,metadataBytes:result.report.metadataBytes,optimization:result.report.projectOptimization};
       if(optimization===2)report[label]=report[key];
     }
+    assert.deepEqual(macOS26Optimizations,[0,1,2,3]);
+    report.macOS26SampleVerified=true;report.macOS26SampleOptimizationsVerified=macOS26Optimizations;
     report.recordsetsVerified=true;report.resourcesVerified=true;report.programLifetimeVerified=true;report.abruptExitVerified=true;
     report.largeCapacityVerified=true;report.optimizationLevelsVerified=[0,1,2,3];
     report.arm64ExecutionVerified=true;report.nativeSignatureVerified=true;

@@ -2,6 +2,7 @@
 #include "appkit-appearance.hpp"
 #include "appkit-edit.hpp"
 #include "appkit-pictures.hpp"
+#include "appkit-collections.hpp"
 
 // Do not subclass NSGlassEffectView: a superclass must exist when the image is
 // loaded, even on a pre-26 system. Instantiate it only inside @available below.
@@ -23,6 +24,43 @@
 @implementation VB6PlaceholderLabel
 -(NSView*)hitTest:(NSPoint)point { (void)point; return nil; }
 -(BOOL)isAccessibilityElement { return NO; }
+@end
+// Keep placeholder layout coupled to the real editor's text-container geometry.
+// This view retains AppKit's text system, marked text, undo and delegate paths.
+@interface VB6AppearanceTextView : NSTextView { @public std::weak_ptr<vb6::MacControl> model; } @end
+@implementation VB6AppearanceTextView
+-(void)setFrameSize:(NSSize)size { [super setFrameSize:size];if(auto c=model.lock())vb6::refreshNativePlaceholder(*c); }
+-(void)setBoundsSize:(NSSize)size { [super setBoundsSize:size];if(auto c=model.lock())vb6::refreshNativePlaceholder(*c); }
+-(void)setTextContainerInset:(NSSize)inset { [super setTextContainerInset:inset];if(auto c=model.lock())vb6::refreshNativePlaceholder(*c); }
+-(void)setAlignment:(NSTextAlignment)alignment { [super setAlignment:alignment];if(auto c=model.lock())vb6::refreshNativePlaceholder(*c); }
+-(void)setMarkedText:(id)value selectedRange:(NSRange)selection replacementRange:(NSRange)replacement {
+  [super setMarkedText:value selectedRange:selection replacementRange:replacement];
+  if(auto c=model.lock())vb6::refreshNativePlaceholder(*c);
+}
+-(void)unmarkText { [super unmarkText];if(auto c=model.lock())vb6::refreshNativePlaceholder(*c); }
+@end
+@interface VB6SegmentedContainer : NSView { @public std::weak_ptr<vb6::MacControl> model; } @end
+@implementation VB6SegmentedContainer
+-(BOOL)isFlipped { return YES; }
+-(BOOL)isAccessibilityElement { return NO; }
+-(void)resizeSubviewsWithOldSize:(NSSize)size { [super resizeSubviewsWithOldSize:size];if(auto c=model.lock())vb6::layoutNativeAppearance(*c); }
+@end
+@interface VB6SegmentedControl : NSSegmentedControl { @public std::weak_ptr<vb6::MacControl> model; }
+-(void)activateSegment:(id)sender;
+@end
+@implementation VB6SegmentedControl
+-(void)activateSegment:(id)sender {
+  (void)sender;if(auto c=model.lock())c->host->event([c]{
+    auto segments=c->appearanceSegments;if(!segments||c->disposed||c->eventSuppression||!c->flag("enabled",true))return;
+    auto segment=segments.selectedSegment;if(segment<0||size_t(segment)>=c->appearanceSegmentItems.size())return;
+    auto identity=c->appearanceSegmentItems[size_t(segment)];auto collection=c->items(c->spec.type=="Toolbar"?"buttons":"tabs");
+    auto found=std::find_if(collection->items.begin(),collection->items.end(),[&](const auto&item){return item->identity==identity;});
+    if(found==collection->items.end()){vb6::refreshNativeSegments(*c);return;}
+    if(c->spec.type=="Toolbar")vb6::activateNativeToolbarItem(*c,*found,[segments isSelectedForSegment:segment]);
+    else {auto item=[(NSTabView*)c->widget tabViewItemAtIndex:NSInteger(found-collection->items.begin())];if(vb6::nativeTabShouldSelect(*c,item))[(NSTabView*)c->widget selectTabViewItem:item];}
+    vb6::refreshNativeSegments(*c);
+  });
+}
 @end
 @interface VB6SwitchContainer : NSView { @public std::weak_ptr<vb6::MacControl> model; } @end
 @implementation VB6SwitchContainer
@@ -98,7 +136,7 @@ struct MaterialFocus {
   }
   void restore() {
     if(!control||control->disposed)return;
-    [window makeFirstResponder:control->widget];if(edit)nativeEditSelect(*control,selection);
+    [window makeFirstResponder:nativeFocusView(*control)];if(edit)nativeEditSelect(*control,selection);
   }
   ~MaterialFocus(){if(control)--control->eventSuppression;}
 };
@@ -213,6 +251,76 @@ void buttonForeground(NSButton*b,NSColor*foreground) {
   if(foreground)[title addAttribute:NSForegroundColorAttributeName value:foreground range:range];
   b.attributedTitle=title;
 }
+void redirectKeyView(NSView*old,NSView*replacement,NSWindow*window) {
+  auto previous=old.previousKeyView,next=old.nextKeyView;
+  if(previous&&previous!=old)previous.nextKeyView=replacement;
+  replacement.nextKeyView=next==old?replacement:next;
+  if(window.initialFirstResponder==old)window.initialFirstResponder=replacement;
+}
+void prepareSegments(MacControl&c) {
+  if(c.spec.type!="Toolbar"&&c.spec.type!="TabStrip"&&c.spec.type!="SSTab")return;
+  const bool desired=setting(c,"macoscontrolstyle")==u"segmented";
+  if(desired==bool(c.appearanceSegments))return;
+  MaterialFocus focus(c);NSWindow*window=c.view.window;
+  if(desired) {
+    auto segments=[VB6SegmentedControl new];segments->model=c.self();segments.target=segments;segments.action=@selector(activateSegment:);
+    segments.segmentStyle=NSSegmentStyleRounded;segments.segmentDistribution=NSSegmentDistributionFillEqually;
+    if(c.spec.type=="Toolbar") {
+      for(NSView*child in c.widget.subviews.copy)if([child isKindOfClass:NSButton.class]&&((NSButton*)child).target==c.delegate&&((NSButton*)child).action==@selector(itemAction:))[child removeFromSuperview];
+      [c.widget addSubview:segments];
+    }else {
+      auto tabs=(NSTabView*)c.widget;c.appearanceTabType=tabs.tabViewType;c.appearanceTabsDrawBackground=tabs.drawsBackground;
+      auto container=[VB6SegmentedContainer new];container->model=c.self();installView(c,container);
+      tabs.tabViewType=NSNoTabsNoBorder;tabs.drawsBackground=NO;[container addSubview:tabs];[container addSubview:segments];
+    }
+    c.appearanceSegments=segments;redirectKeyView(c.widget,segments,window);refreshNativeSegments(c);
+  }else {
+    auto segments=c.appearanceSegments;redirectKeyView(segments,c.widget,window);
+    [segments removeFromSuperview];c.appearanceSegments=nil;c.appearanceSegmentItems.clear();
+    if(c.spec.type=="Toolbar")c.items("buttons")->changed();
+    else {auto tabs=(NSTabView*)c.widget;[tabs removeFromSuperview];installView(c,tabs);tabs.tabViewType=NSTabViewType(c.appearanceTabType);tabs.drawsBackground=c.appearanceTabsDrawBackground;}
+  }
+  focus.restore();
+}
+void layoutSegments(MacControl&c,NSView*layout) {
+  auto segments=c.appearanceSegments;if(!segments)return;
+  auto bounds=layout.bounds;auto size=segments.intrinsicContentSize;
+  CGFloat height=std::min(bounds.size.height,std::max(CGFloat(0),size.height));
+  CGFloat inset=std::min(CGFloat(4),bounds.size.width/2),width=std::max(CGFloat(0),bounds.size.width-2*inset);
+  if(c.spec.type=="Toolbar")segments.frame=NSMakeRect(inset,(bounds.size.height-height)/2,width,height);
+  else {
+    CGFloat band=std::min(bounds.size.height,height+8);bool bottom=c.number("taborientation",0)==1;
+    segments.frame=NSMakeRect(inset,bottom?bounds.size.height-band+(band-height)/2:(band-height)/2,width,height);
+    c.widget.frame=NSMakeRect(0,bottom?0:band,bounds.size.width,std::max(CGFloat(0),bounds.size.height-band));
+  }
+}
+}
+NSView* nativeFocusView(const MacControl&c) {return c.appearanceSegments?:c.widget;}
+void refreshNativeSegments(MacControl&c) {
+  auto segments=c.appearanceSegments;if(!segments||c.disposed)return;
+  const bool toolbar=c.spec.type=="Toolbar";auto collection=c.items(toolbar?"buttons":"tabs");validateNativeSegmentItems(c,collection->items);
+  std::vector<std::shared_ptr<MacItem>>visible;for(const auto&item:collection->items)if(!item->properties.count("visible")||item->properties.at("visible").truth())visible.push_back(item);
+  if(segments.segmentCount!=NSInteger(visible.size()))segments.segmentCount=NSInteger(visible.size());
+  segments.hidden=visible.empty();segments.enabled=c.flag("enabled",true);segments.controlSize=nativeControlSize(c);
+  int style=toolbar&&!collection->items.empty()&&collection->items.front()->properties.count("style")?int(collection->items.front()->properties.at("style").integral()):2;
+  auto tracking=!toolbar||style==2?NSSegmentSwitchTrackingSelectOne:style==1?NSSegmentSwitchTrackingSelectAny:NSSegmentSwitchTrackingMomentary;
+  if(segments.trackingMode!=tracking)segments.trackingMode=tracking;
+  c.appearanceSegmentItems.clear();auto tabs=toolbar?nil:(NSTabView*)c.widget;NSInteger selectedSegment=-1;
+  for(size_t i=0;i<visible.size();++i) {
+    const auto&item=visible[i];auto property=[&](const char*key,Value fallback){auto found=item->properties.find(key);return found==item->properties.end()?fallback:found->second;};
+    NSString*label=ns(captionText(property("text",Value::string(u"")).string()));if(![[segments labelForSegment:NSInteger(i)]isEqualToString:label])[segments setLabel:label forSegment:NSInteger(i)];
+    [segments setEnabled:property("enabled",Value::boolean(true)).truth() forSegment:NSInteger(i)];
+    [(NSSegmentedCell*)segments.cell setToolTip:ns(property("tooltiptext",Value::string(u"")).string())forSegment:NSInteger(i)];
+    auto selected=toolbar?property("value",Value::integer(0)).truth():[tabs.selectedTabViewItem.identifier isEqual:[NSString stringWithFormat:@"%llu",static_cast<unsigned long long>(item->identity)]];
+    if(tracking==NSSegmentSwitchTrackingSelectOne){if(selected)selectedSegment=NSInteger(i);}
+    else [segments setSelected:selected forSegment:NSInteger(i)];
+    c.appearanceSegmentItems.push_back(item->identity);
+  }
+  // SelectOne has one control-level selection. Apply it once after resolving
+  // visible identities, including -1 when the selected model item is hidden.
+  if(tracking==NSSegmentSwitchTrackingSelectOne)segments.selectedSegment=selectedSegment;
+  if(!toolbar)tabs.drawsBackground=NO;
+  layoutSegments(c,c.appearanceContent?:c.view);
 }
 bool nativeAppearanceProperty(const std::string&name) {return name=="macosindeterminate"||defaults.count(name);}
 Value nativeAppearanceDefault(const std::string&name) {
@@ -270,12 +378,13 @@ void validateNativeAppearance(const MacControl&c) {
     if(value.type!=Type::String)fail(380,"Native appearance values must be strings");
     auto v=value.string();if(v.find(u'\0')!=Text::npos||v.size()>(key=="macosaccessibilityidentifier"?1024:16384))fail(380,"Invalid native appearance text");
     if(key=="macoscontrolsize"&&!oneOf(v,{u"mini",u"small",u"regular",u"large",u"extraLarge"}))fail(380,"Unknown native control size");
-    if(key=="macoscontrolstyle"&&!(v==u"automatic"||type=="CommandButton"&&oneOf(v,{u"push",u"default",u"destructive",u"borderless",u"inline",u"circular",u"help"})||type=="CheckBox"&&v==u"switch"||type=="TextBox"&&v==u"search"))fail(380,"Native control style is unsupported for "+type);
+    if(key=="macoscontrolstyle"&&!(v==u"automatic"||type=="CommandButton"&&oneOf(v,{u"push",u"default",u"destructive",u"borderless",u"inline",u"circular",u"help"})||type=="CheckBox"&&v==u"switch"||type=="TextBox"&&v==u"search"||oneOfType(type,{"Toolbar","TabStrip","SSTab"})&&v==u"segmented"))fail(380,"Native control style is unsupported for "+type);
     if(key=="macosmaterial"&&!oneOf(v,{u"none",u"content",u"sidebar",u"titlebar",u"toolbar",u"menu",u"popover",u"sheet",u"hud"}))fail(380,"Unknown native material");
     if(key=="placeholdertext"&&!oneOfType(type,{"TextBox","ComboBox"}))fail(380,"PlaceholderText requires TextBox or ComboBox");
     if(v==nativeAppearanceDefault(key).string())continue;
     if(oneOfType(type,{"Timer","ImageList","CommonDialog","Menu","Data","Adodc"}))fail(438,"Nonvisual object does not expose native appearance");
-    if(key=="macosmaterial"&&!oneOfType(type,{"Form","MDIForm","PictureBox","Frame","Toolbar","StatusBar","ListBox","TreeView","ListView"}))fail(438,"Native material is unsupported for "+type);
+    if(key=="macosmaterial"&&!oneOfType(type,{"Form","MDIForm","PictureBox","Frame","Toolbar","StatusBar","ListBox","TreeView","ListView","TabStrip","SSTab"}))fail(438,"Native material is unsupported for "+type);
+    if(key=="macosmaterial"&&oneOfType(type,{"TabStrip","SSTab"})&&style!=u"segmented")fail(438,"Native tab materials require MacOSControlStyle=segmented");
     if(key=="macoscontrolsize") {
       if(!oneOfType(type,{"CommandButton","Label","TextBox","CheckBox","OptionButton","ComboBox","DriveListBox","ListBox","FileListBox","DirListBox","TreeView","ListView","MSFlexGrid","MSHFlexGrid","DataGrid","HScrollBar","VScrollBar","Slider","UpDown","ProgressBar","DTPicker","MonthView","TabStrip","SSTab","Toolbar","StatusBar"})||type=="TextBox"&&c.flag("multiline"))fail(438,"Native control size is unsupported for "+type);
       (void)nativeControlSize(c);
@@ -291,6 +400,9 @@ void validateNativeAppearance(const MacControl&c) {
   }
   if(style==u"search"&&(c.flag("multiline")||!c.property("passwordchar",Value::string(u"")).string().empty()))fail(380,"Search requires a single-line, non-password TextBox");
   if(style==u"switch"&&c.number("value",0)!=0&&c.number("value",0)!=1)fail(380,"Native switches require a binary CheckBox Value of 0 or 1");
+  if(style==u"segmented"&&oneOfType(type,{"TabStrip","SSTab"})&&c.number("taborientation",0)!=0&&c.number("taborientation",0)!=1)fail(380,"Segmented tabs require top or bottom orientation");
+  if(auto found=c.collections.find("buttons");found!=c.collections.end())validateNativeSegmentItems(c,found->second->items);
+  if(auto found=c.collections.find("tabs");found!=c.collections.end())validateNativeSegmentItems(c,found->second->items);
 }
 void setNativeAppearance(MacControl&c,const std::string&name,Value value) {
   auto before=c.properties;c.properties[name]=std::move(value);
@@ -300,6 +412,7 @@ void setNativeAppearance(MacControl&c,const std::string&name,Value value) {
     // create synthetic edit events. Apply only the facet being assigned.
     if(name.rfind("macosaccessibility",0)==0) {
       accessibility(c,c.widget);if(c.view!=c.widget)accessibility(c,c.view);
+      if(c.appearanceSegments)accessibility(c,c.appearanceSegments);
       if(c.spec.type=="Form"||c.spec.type=="MDIForm")if(auto owner=c.owner.lock())accessibility(c,c.host->form(owner)->window);
       return;
     }
@@ -326,6 +439,7 @@ void prepareNativeAppearance(MacControl&c) {
     const bool search=[c.widget isKindOfClass:NSSearchField.class];
     if((style==u"search")!=search)replaceWidget(c,style==u"search"?nativeSearchField():nativeTextField(!c.property("passwordchar",Value::string(u"")).string().empty()));
   }
+  prepareSegments(c);
   material(c);
 }
 void refreshNativePlaceholder(MacControl&c) {
@@ -335,12 +449,18 @@ void refreshNativePlaceholder(MacControl&c) {
   auto editor=(NSTextView*)c.widget;
   if(!c.appearancePlaceholder&&!value.empty()) {
     auto label=[[VB6PlaceholderLabel alloc]initWithFrame:NSZeroRect];label.editable=NO;label.selectable=NO;label.bezeled=NO;label.drawsBackground=NO;
-    label.autoresizingMask=NSViewWidthSizable;label.textColor=NSColor.placeholderTextColor;c.appearancePlaceholder=label;[editor addSubview:label];
+    label.maximumNumberOfLines=0;label.lineBreakMode=NSLineBreakByWordWrapping;
+    auto cell=(NSTextFieldCell*)label.cell;cell.wraps=YES;cell.scrollable=NO;cell.usesSingleLineMode=NO;
+    label.textColor=NSColor.placeholderTextColor;c.appearancePlaceholder=label;[editor addSubview:label];
   }
   auto label=c.appearancePlaceholder;if(!label)return;
-  label.stringValue=ns(value);label.font=editor.font?:[NSFont systemFontOfSize:NSFont.systemFontSize];label.hidden=value.empty()||editor.string.length!=0;
-  auto inset=editor.textContainerInset;auto padding=editor.textContainer.lineFragmentPadding;
-  label.frame=NSMakeRect(inset.width+padding,inset.height,std::max(CGFloat(0),editor.bounds.size.width-2*(inset.width+padding)),std::ceil(label.font.ascender-label.font.descender+3));
+  label.stringValue=ns(value);label.font=editor.font?:[NSFont systemFontOfSize:NSFont.systemFontSize];label.alignment=editor.alignment;
+  label.hidden=value.empty()||editor.string.length!=0||editor.hasMarkedText;
+  auto origin=editor.textContainerOrigin;auto inset=editor.textContainerInset;auto padding=editor.textContainer.lineFragmentPadding;
+  CGFloat width=std::max(CGFloat(0),editor.bounds.size.width-origin.x-inset.width-2*padding);
+  CGFloat available=std::max(CGFloat(0),editor.bounds.size.height-origin.y-inset.height);
+  auto measured=[label.cell cellSizeForBounds:NSMakeRect(0,0,width,CGFLOAT_MAX)];
+  label.frame=NSMakeRect(origin.x+padding,origin.y,width,std::min(available,std::ceil(measured.height)));
 }
 void layoutNativeAppearance(MacControl&c) {
   NSView*layout=c.appearanceContent?:c.view;
@@ -355,6 +475,8 @@ void layoutNativeAppearance(MacControl&c) {
     return;
   }
   if(c.widget!=layout&&![layout isKindOfClass:NSScrollView.class])c.widget.frame=layout.bounds;
+  layoutSegments(c,layout);
+  if([c.widget isKindOfClass:NSTabView.class])layoutNativeTabPages(c);
   refreshNativePlaceholder(c);
 }
 void applyNativeItemAppearance(MacControl&c,NSButton*button) {
@@ -366,6 +488,10 @@ void applyNativeAppearance(MacControl&c) {
   if(!c.view||c.disposed||c.applyingAppearance)return;Applying applying(c);
   auto size=nativeControlSize(c);auto style=setting(c,"macoscontrolstyle");
   if([c.widget respondsToSelector:@selector(setControlSize:)])[(id)c.widget setControlSize:size];
+  if([c.widget isKindOfClass:NSTabView.class]&&!c.appearanceSegments) {
+    auto tabs=(NSTabView*)c.widget;const NSTabViewType orientations[]={NSTopTabsBezelBorder,NSBottomTabsBezelBorder,NSLeftTabsBezelBorder,NSRightTabsBezelBorder};
+    tabs.tabViewType=orientations[std::clamp(int(c.number("taborientation",0)),0,3)];
+  }
   NSColor*background=nativeSemanticColor(setting(c,"macosbackgroundrole"));NSColor*foreground=nativeSemanticColor(setting(c,"macosforegroundrole"));
   if(!background&&c.properties.count("backcolor"))background=nativeBackgroundColor(c);
   if(!foreground&&c.properties.count("forecolor"))foreground=nativeForegroundColor(c);
@@ -411,6 +537,7 @@ void applyNativeAppearance(MacControl&c) {
   if(@available(macOS 26.0,*))if([c.view isKindOfClass:NSGlassEffectView.class])((NSGlassEffectView*)c.view).tintColor=background;
 #endif
   if(c.spec.type=="Toolbar"||c.spec.type=="StatusBar")for(NSView*child in c.widget.subviews)if([child isKindOfClass:NSButton.class])applyNativeItemAppearance(c,(NSButton*)child);
+  refreshNativeSegments(c);if(c.appearanceSegments)accessibility(c,c.appearanceSegments);
   accessibility(c,c.widget);if(c.view!=c.widget)accessibility(c,c.view);
   if(c.spec.type=="Form"||c.spec.type=="MDIForm") {
     if(auto object=c.owner.lock()){auto found=c.host->forms.find(object.get());if(found!=c.host->forms.end()){auto window=found->second->window;if(window){window.backgroundColor=background?:nativeBackgroundColor(c);accessibility(c,window);}}}
@@ -419,6 +546,7 @@ void applyNativeAppearance(MacControl&c) {
 }
 NSBox* nativeAppearanceBox(const std::shared_ptr<MacControl>&c) {auto box=[VB6AppearanceBox new];box->model=c;return box;}
 NSImageView* nativeAppearanceImage(const std::shared_ptr<MacControl>&c) {auto image=[VB6AppearanceImage new];image->model=c;return image;}
+NSTextView* nativeAppearanceTextView(const std::shared_ptr<MacControl>&c) {auto editor=[[VB6AppearanceTextView alloc]initWithFrame:NSMakeRect(0,0,120,80)];editor->model=c;return editor;}
 NSView* nativeSwitchView(MacControl&c,NSSwitch*control) {
   auto container=[VB6SwitchContainer new];container->model=c.self();
   auto label=[[VB6PlaceholderLabel alloc]initWithFrame:NSZeroRect];label.editable=NO;label.selectable=NO;label.bezeled=NO;label.bordered=NO;label.drawsBackground=NO;label.lineBreakMode=NSLineBreakByTruncatingTail;

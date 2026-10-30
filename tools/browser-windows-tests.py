@@ -18,6 +18,9 @@ from playwright.sync_api import sync_playwright, Error
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORT = ROOT / 'reports' / 'browser-windows'
+# Full IDE parsing includes the embedded native AOT payloads. Startup gets its
+# own bound while popup and input assertions retain the 6000 ms action deadline.
+IDE_STARTUP_TIMEOUT_MS = 60000
 PROJECT = {'schema': 1, 'id': 'windows-test', 'name': 'WindowLab', 'startup': 'Sub Main',
            'settings': {'renderer': 'canvas2d'}, 'modules': [
     {'id': 'main', 'name': 'MainModule', 'kind': 'module', 'code':
@@ -56,6 +59,7 @@ class BrowserWindows(unittest.TestCase):
 
     def setUp(self):
         self.context = self.browser.new_context(viewport={'width': 1440, 'height': 1000})
+        self.addCleanup(self.context.close)
         self.context.set_default_timeout(6000)
         self.errors = []
         self.trace = []
@@ -63,18 +67,24 @@ class BrowserWindows(unittest.TestCase):
         self.page = self.context.new_page()
         self.boot_page(self.page)
 
-    def boot_page(self, page):
-        if os.environ.get('VB6_TEST_TRANSPORT') == 'memory':
-            page.set_content((ROOT / 'dist' / 'VB6-Studio-Web.html').read_text())
+    def boot_page(self, page, url=None):
+        if url is None and os.environ.get('VB6_TEST_TRANSPORT') == 'memory':
+            page.set_content((ROOT / 'dist' / 'VB6-Studio-Web.html').read_text(),
+                             wait_until='domcontentloaded', timeout=IDE_STARTUP_TIMEOUT_MS)
         else:
-            page.goto(self.url)
-        page.wait_for_function('typeof vb6Studio === "object"')
+            page.goto(url or self.url, wait_until='commit', timeout=IDE_STARTUP_TIMEOUT_MS)
+        self.wait_for_ide(page)
+
+    def wait_for_ide(self, page):
+        # WebKit can keep a large inline file document in "loading" after the
+        # application is usable. Require the actual IDE API and rendered shell.
+        page.wait_for_function('typeof vb6Studio === "object" && vb6Studio.root?.isConnected && typeof vb6Studio.command === "function" && typeof vb6Studio.browserWindows?.detach === "function" && !!document.querySelector(".ide-shell")',
+                               polling=100, timeout=IDE_STARTUP_TIMEOUT_MS)
 
     def tearDown(self):
         if self.trace:
             (REPORT / (self._testMethodName + '.json')).write_text(json.dumps(self.trace, indent=2))
         errors = self.errors[:]
-        self.context.close()
         self.assertEqual(errors, [], 'Uncaught page errors')
 
     def closing_action(self, popup, action):
@@ -460,8 +470,8 @@ class BrowserWindows(unittest.TestCase):
         self.code()
         popup = self.document()
         self.js('vb6Studio.persist()')
-        self.page.reload()
-        self.page.wait_for_function('typeof vb6Studio === "object"')
+        self.page.reload(wait_until='commit', timeout=IDE_STARTUP_TIMEOUT_MS)
+        self.wait_for_ide(self.page)
         self.count(0)
         self.assertTrue(popup.is_closed())
         self.assertEqual(self.js('vb6Studio.browserWindows.pending.size'), 1)
@@ -543,8 +553,7 @@ class BrowserWindows(unittest.TestCase):
 
     @unittest.skipIf(os.environ.get('VB6_TEST_TRANSPORT') == 'memory', 'Needs real navigation; exercised in HTTP CI')
     def test_standalone_file_without_network(self):
-        self.page.goto((ROOT / 'dist' / 'VB6-Studio-Web.html').as_uri())
-        self.page.wait_for_function('typeof vb6Studio === "object"')
+        self.boot_page(self.page, (ROOT / 'dist' / 'VB6-Studio-Web.html').as_uri())
         requests = []
         self.context.on('request', lambda req: requests.append(req.url) if req.url.startswith(('http:', 'https:')) else None)
         popup = self.tool()
@@ -779,8 +788,8 @@ class BrowserWindows(unittest.TestCase):
         self.document()
         self.window_mode('mdi')
         self.js('vb6Studio.persist()')
-        self.page.reload()
-        self.page.wait_for_function('typeof vb6Studio === "object"')
+        self.page.reload(wait_until='commit', timeout=IDE_STARTUP_TIMEOUT_MS)
+        self.wait_for_ide(self.page)
         self.count(0)
         self.assertEqual(self.js('vb6Studio.appearance.windowMode'), 'mdi')
         self.assertEqual(self.js('vb6Studio.browserWindows.pending.size'), 1)

@@ -2,9 +2,18 @@
 #include "appkit-control-utils.hpp"
 #include "appkit-recordsets.hpp"
 #include "appkit-edit.hpp"
+#include "appkit-appearance.hpp"
+#include "appkit-collections.hpp"
 namespace vb6 {
 Value MacControl::invoke(Runtime&rt,const std::string&raw,Args args){
   if(disposed)fail(91);bool put=raw.rfind("let:",0)==0||raw.rfind("set:",0)==0;auto name=lower(put?raw.substr(4):raw);if(name.empty())name=defaultMember();
+  // Toolbar.Buttons(key) and the other collection properties invoke Item.
+  // Preserve the collection's identity, index rules and argument diagnostics.
+  if(!put&&(name=="nodes"||name=="listitems"||name=="columnheaders"||name=="panels"||name=="buttons"||name=="listimages"||(name=="tabs"&&spec.type!="SSTab")))
+    return args.empty()?Value::object(items(name)):items(name)->invoke(rt,"item",std::move(args));
+  if(spec.type=="SSTab"&&(name=="tabcaption"||name=="tabenabled"||name=="tabvisible")) {
+    if(args.size()!=(put?2:1))fail(450);return nativeIndexedTab(*this,name,args[0].value.integral(),put?&args[1].value:nullptr);
+  }
   if(name=="list"||name=="itemdata"||name=="selected"){
     if(args.size()!=(put?2:1))fail(450);auto index=args[0].value.integral();rangeCheck(index,list.size());size_t i=size_t(index);
     if(put){if(name=="list")list[i]=args[1].value.string();else if(name=="itemdata")itemData[i]=static_cast<int32_t>(coerce(args[1].value,"long").integral());else{if(args[1].value.truth()){if(!flag("multiselect"))selected.clear();selected.insert(i);}else selected.erase(i);}reloadList();return {};}
@@ -32,7 +41,7 @@ Value MacControl::invoke(Runtime&rt,const std::string&raw,Args args){
     std::set<size_t> shifted;for(auto i:selected)if(i!=size_t(index))shifted.insert(i>size_t(index)?i-1:i);selected.swap(shifted);
     auto prior=property("listindex",Value::integer(-1)).integral();properties["listindex"]=Value::integer(prior==index?-1:prior>index?prior-1:prior);reloadList();return {};}
   if(name=="clear"){if(dataBinding)fail(380,"Clear requires detaching the Recordset");if(!args.empty())fail(450);list.clear();itemData.clear();selected.clear();properties["listindex"]=Value::integer(-1);for(auto&row:grid)for(auto&cell:row)cell.clear();reloadList();return {};}
-  if(name=="setfocus"){if(!args.empty())fail(450);if(!view||view.hidden||!flag("enabled",true))fail(5);auto window=view.window;auto selection=isNativeEdit(*this)?nativeEditSelection(*this):NSMakeRange(0,0);if(!window||![window makeFirstResponder:widget])fail(5);if(isNativeEdit(*this))nativeEditSelect(*this,selection);return {};}
+  if(name=="setfocus"){if(!args.empty())fail(450);if(!view||view.hidden||!flag("enabled",true))fail(5);auto window=view.window;auto selection=isNativeEdit(*this)?nativeEditSelection(*this):NSMakeRange(0,0);if(!window||![window makeFirstResponder:nativeFocusView(*this)])fail(5);if(isNativeEdit(*this))nativeEditSelect(*this,selection);return {};}
   if(name=="refresh"){view.needsDisplay=YES;widget.needsDisplay=YES;[view displayIfNeeded];return {};}
   if(name=="move"){if(args.size()<2||args.size()>4)fail(450);const char*names[]={"left","top","width","height"};for(size_t i=0;i<args.size();i++)if(args[i].value.type!=Type::Missing)properties[names[i]]=args[i].value;applyFrame();return {};}
   if(name=="zorder"){auto mode=integerArgument(args,0,0);if(mode!=0&&mode!=1)fail(5);auto parent=view.superview;if(parent){[view removeFromSuperview];[parent addSubview:view positioned:mode==0?NSWindowAbove:NSWindowBelow relativeTo:nil];}return {};}

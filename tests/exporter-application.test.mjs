@@ -13,8 +13,10 @@ const embedded = (html, id) => JSON.parse(new RegExp(`<script id="${id}" type="a
 for (const example of EXAMPLES) test('split deployment preserves complete ' + example.id, () => {
   const p = JSON.parse(readFileSync(new URL('../examples/' + example.id + '.vb6web', import.meta.url), 'utf8'));
   const before = structuredClone(p), options = {persist: false}, bundle = exportApplicationFiles(p, options);
+  const deployed = structuredClone(before);
+  for (const module of deployed.modules) delete module.xaml; // Authoring source stays in the saved project.
   assert.equal(bundle.entry, 'index.html'); assert.equal(bundle.manifest.runtimeVersion, RUNTIME_VERSION);
-  assert.deepEqual(embedded(bundle.files['index.html'], 'vb6-project'), before);
+  assert.deepEqual(embedded(bundle.files['index.html'], 'vb6-project'), deployed);
   assert.deepEqual(embedded(bundle.files['index.html'], 'vb6-options'), options);
   assert.deepEqual(p, before); assert.deepEqual(options, {persist: false});
   assert.deepEqual(bundle, exportApplicationFiles(p, options));

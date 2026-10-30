@@ -2,6 +2,7 @@
 #include "gtk.hpp"
 #include <iostream>
 #include <cstring>
+#include "gtk-basic-dialog-contracts.hpp"
 
 using namespace vb6;
 namespace {
@@ -22,6 +23,24 @@ std::shared_ptr<GtkControl> control(const std::shared_ptr<Instance>& form,const 
   auto c=std::dynamic_pointer_cast<GtkControl>(found->second);require(bool(c),"Invalid native control type");return c;
 }
 Parameter param(const std::string& name,const std::string& type,bool byRef=true){Parameter value;value.name=name;value.type=type;value.byRef=byRef;return value;}
+void checkNativeTree(GtkControl& tree,const std::vector<std::shared_ptr<GtkItem>>& expected){
+  auto* model=gtk_tree_view_get_model(GTK_TREE_VIEW(tree.widget));
+  require(model&&model==tree.model&&GTK_IS_TREE_STORE(model),"TreeView is not displaying its native GtkTreeStore");
+  require(gtk_tree_model_iter_n_children(model,nullptr)==(expected.empty()?0:1),"Native tree has an unexpected root count");
+  require(tree.treePaths.size()==expected.size(),"Native tree path identities differ from the node collection");
+  if(expected.empty())return;
+  GtkTreeIter iter;require(gtk_tree_model_get_iter_first(model,&iter),"Native tree root is missing");
+  for(size_t depth=0;depth<expected.size();++depth){
+    guint64 identity=0;gchar* text=nullptr;
+    gtk_tree_model_get(model,&iter,0,&text,gtk_tree_model_get_n_columns(model)-1,&identity,-1);
+    const bool matches=text&&toUTF8(expected[depth]->properties.at("text").string())==text;g_free(text);
+    require(matches&&identity==expected[depth]->identity,"Native tree row lost its text or node identity");
+    GtkTreeIter sibling=iter;require(!gtk_tree_model_iter_next(model,&sibling),"Native boundary tree has an unexpected sibling");
+    const bool child=depth+1<expected.size();
+    require(gtk_tree_model_iter_n_children(model,&iter)==(child?1:0),"Native tree has the wrong depth or child count");
+    if(child){GtkTreeIter next;require(gtk_tree_model_iter_children(model,&next,&iter),"Native tree descendant is missing");iter=next;}
+  }
+}
 }
 int main() {
   try {
@@ -35,18 +54,22 @@ int main() {
     const std::vector<std::string> types={"CommandButton","CheckBox","OptionButton","Label","TextBox","RichTextBox","Frame","PictureBox","Image","Line","Shape","ComboBox","ListBox","DriveListBox","DirListBox","FileListBox","HScrollBar","VScrollBar","Slider","UpDown","ProgressBar","DTPicker","MonthView","TreeView","ListView","MSFlexGrid","MSHFlexGrid","DataGrid","TabStrip","SSTab","Toolbar","StatusBar","ImageList","CommonDialog","Timer","MSChart"};
     for(size_t i=0;i<types.size();++i)module.controls.push_back(spec(types[i],"C"+types[i],{{"left",Value::integer((i%8)*1800)},{"top",Value::integer((i/8)*1400)},{"interval",Value::integer(0)}}));
     auto child=spec("TextBox","Nested",{{"left",Value::integer(75)},{"top",Value::integer(150)}});child.parent="CFrame";module.controls.insert(module.controls.begin(),child);
+#if GTK_MAJOR_VERSION >= 4
+    auto focusFrame=spec("Frame","FocusFrame",{{"left",Value::integer(9000)},{"top",Value::integer(7500)},{"width",Value::integer(4500)},{"height",Value::integer(1500)}});module.controls.push_back(focusFrame);
+    for(int i=2;i>=0;--i){auto focus=spec("TextBox","Focus"+std::to_string(i),{{"left",Value::integer(i*1350)},{"top",Value::integer(300)},{"width",Value::integer(1200)},{"tabindex",Value::integer(i)},{"tabstop",Value::boolean(i!=1)}});focus.parent="FocusFrame";module.controls.push_back(focus);}
+#endif
     auto tabbed=spec("TextBox","TabbedEditor",{{"multiline",Value::boolean(true)}});tabbed.parent="CTabStrip";module.controls.push_back(tabbed);
     auto menu=spec("Menu","FileMenu",{{"caption",Value::string(u"&File")}});module.menus.push_back(menu);
     auto exitMenu=spec("Menu","ExitMenu",{{"caption",Value::string(u"E&xit")}});exitMenu.parent="FileMenu";module.menus.push_back(exitMenu);
     int buttonClicks=0,textChanges=0,checkClicks=0,labelClicks=0,menuClicks=0,keyDown=0,lastKeyPress=0,arrayIndex=-1,queryCount=0,unloadCount=0,modalTicks=0,timerTicks=0,apiTicks=0;
-    bool cancelNext=true,cancelKeys=true,unloadTimer=false;
+    bool cancelNext=true,cancelKeys=true,unloadTimer=false,rewriteKeyPress=false;
     module.procedures["ccommandbutton_click"]=procedure("ccommandbutton_click",[&](Frame&){++buttonClicks;return Value{};});
     module.procedures["ctextbox_change"]=procedure("ctextbox_change",[&](Frame&){++textChanges;return Value{};});
     module.procedures["ccheckbox_click"]=procedure("ccheckbox_click",[&](Frame&){++checkClicks;return Value{};});
     module.procedures["clabel_click"]=procedure("clabel_click",[&](Frame&){++labelClicks;return Value{};});
     module.procedures["exitmenu_click"]=procedure("exitmenu_click",[&](Frame&){++menuClicks;return Value{};});
     module.procedures["form_keydown"]=procedure("form_keydown",[&](Frame& frame){++keyDown;if(cancelKeys)frame.ref("keycode").set(Value::integer(0,Type::Integer));return Value{};},{param("keycode","integer"),param("shift","integer")});
-    module.procedures["form_keypress"]=procedure("form_keypress",[&](Frame& frame){lastKeyPress=int(frame.get("keyascii").integral());return Value{};},{param("keyascii","integer")});
+    module.procedures["form_keypress"]=procedure("form_keypress",[&](Frame& frame){lastKeyPress=int(frame.get("keyascii").integral());if(rewriteKeyPress)frame.ref("keyascii").set(Value::integer(0x3a9,Type::Integer));return Value{};},{param("keyascii","integer")});
     module.procedures["form_queryunload"]=procedure("form_queryunload",[&](Frame& frame){++queryCount;if(cancelNext){cancelNext=false;frame.ref("cancel").set(Value::integer(1,Type::Integer));}return Value{};},{param("cancel","integer"),param("unloadmode","integer")});
     module.procedures["form_unload"]=procedure("form_unload",[&](Frame&){++unloadCount;return Value{};},{param("cancel","integer")});
     module.procedures["ctimer_timer"]=procedure("ctimer_timer",[&](Frame& frame){++timerTicks;control(frame.self,"CTimer")->set(runtime,"enabled",Value::boolean(false));if(unloadTimer)runtime.unload(frame.self);return Value{};});
@@ -62,6 +85,7 @@ int main() {
     runtime.modules[lower(callbacks.name)]=callbacks;
     auto instance=runtime.instance(module.name);runtime.load(instance);host.formCall(instance,"show",{});host.pump();
     auto form=host.form(instance);
+    qualifyGtkBasicDialogs(runtime,host);
     require(GTK_IS_WINDOW(form->window),"VB Form is not a native GtkWindow");
     require(GTK_IS_BUTTON(control(instance,"CCommandButton")->widget),"Button is not native GTK");
     require(GTK_IS_TEXT_VIEW(control(instance,"CRichTextBox")->widget),"RichTextBox is not native GTK");
@@ -71,20 +95,56 @@ int main() {
     require(gtk_widget_get_parent(control(instance,"Nested")->view)==control(instance,"CFrame")->content,"Nested control is not contained in its GTK frame");
     for(auto& type:types){auto c=control(instance,"C"+type);require(!c->disposed&&c->handle>0,"Native control type was not initialized");}
     gtk_button_clicked(GTK_BUTTON(control(instance,"CCommandButton")->widget));host.check();require(buttonClicks==1,"Native GTK clicked did not dispatch VB Click");
-    gtk_menu_item_activate(GTK_MENU_ITEM(control(instance,"ExitMenu")->menu));host.check();require(menuClicks==1,"Native menu did not dispatch VB Click");
+#if GTK_MAJOR_VERSION >= 4
+    require(GTK_IS_POPOVER_MENU_BAR(form->menuBar)&&G_IS_MENU_MODEL(form->menuModel),"GTK4 menus do not use native popover menu models");
+    g_action_activate(G_ACTION(control(instance,"ExitMenu")->menuAction),nullptr);
+#else
+    gtk_menu_item_activate(GTK_MENU_ITEM(control(instance,"ExitMenu")->menu));
+#endif
+    host.check();require(menuClicks==1,"Native menu did not dispatch VB Click");
+#if GTK_MAJOR_VERSION >= 4
+    auto menuControl=control(instance,"ExitMenu");menuControl->set(runtime,"enabled",Value::boolean(false));require(!g_action_get_enabled(G_ACTION(menuControl->menuAction)),"GTK4 menu action ignored Enabled=False");g_action_activate(G_ACTION(menuControl->menuAction),nullptr);host.check();require(menuClicks==1,"A disabled GTK4 menu dispatched Click");menuControl->set(runtime,"enabled",Value::boolean(true));menuControl->set(runtime,"checked",Value::boolean(true));
+    auto* checked=g_action_get_state(G_ACTION(menuControl->menuAction));require(checked&&g_variant_get_boolean(checked),"GTK4 menu action lost checked state");g_variant_unref(checked);menuControl->set(runtime,"checked",Value::boolean(false));
+    auto menuRoot=control(instance,"FileMenu");menuRoot->set(runtime,"visible",Value::boolean(false));require(!gtk_widget_get_visible(form->menuBar),"Hidden root menu remained in the GTK4 menu bar");require(g_menu_model_get_n_items(G_MENU_MODEL(menuRoot->submenuModel))>0,"Hidden root menu lost its native context model");
+    host.formCall(instance,"popupmenu",{Arg(Value::object(menuRoot)),Arg(Value::integer(0)),Arg(Value::integer(450)),Arg(Value::integer(600))});GtkWidget* popup=nullptr;for(auto* child=gtk_widget_get_first_child(form->surface->view);child;child=gtk_widget_get_next_sibling(child))if(GTK_IS_POPOVER_MENU(child))popup=child;require(popup&&gtk_widget_get_visible(popup),"PopupMenu did not open a real GTK4 popover for a hidden root");gtk_popover_popdown(GTK_POPOVER(popup));menuRoot->set(runtime,"visible",Value::boolean(true));host.pump();
+    auto firstFocus=control(instance,"Focus0"),skipFocus=control(instance,"Focus1"),lastFocus=control(instance,"Focus2");auto focusContainer=control(instance,"FocusFrame");
+    require(gtk_widget_get_first_child(focusContainer->content)==lastFocus->view&&gtk_widget_get_last_child(focusContainer->content)==firstFocus->view,"GTK4 TabIndex initialization changed native designer stacking order");
+    gtk_widget_grab_focus(firstFocus->widget);require(gtk_widget_child_focus(focusContainer->content,GTK_DIR_TAB_FORWARD)&&host.controlForWidget(gtk_window_get_focus(GTK_WINDOW(form->window)))==lastFocus,"GTK4 Tab navigation ignored TabIndex or TabStop");
+    require(gtk_widget_child_focus(focusContainer->content,GTK_DIR_TAB_BACKWARD)&&host.controlForWidget(gtk_window_get_focus(GTK_WINDOW(form->window)))==firstFocus,"GTK4 reverse Tab navigation lost container order");skipFocus->invoke(runtime,"setfocus",{});require(host.controlForWidget(gtk_window_get_focus(GTK_WINDOW(form->window)))==skipFocus,"TabStop=False incorrectly prevented explicit SetFocus");
+    firstFocus->invoke(runtime,"zorder",{Arg(Value::integer(0))});require(gtk_widget_get_last_child(focusContainer->content)==firstFocus->view,"GTK4 Control.ZOrder did not raise the actual child");firstFocus->invoke(runtime,"zorder",{Arg(Value::integer(1))});require(gtk_widget_get_first_child(focusContainer->content)==firstFocus->view,"GTK4 Control.ZOrder did not lower the actual child");
+#endif
     auto entry=control(instance,"CTextBox");gtk_entry_set_text(GTK_ENTRY(entry->widget),"A😀ŻZ");host.check();require(textChanges==1,"Native edit did not dispatch VB Change");
     entry->editSelect(1,2);require(entry->get(runtime,"seltext").string()==u"😀","GTK selection lost VB UTF-16 offsets");
     entry->set(runtime,"seltext",Value::string(u"Ω"));require(entry->editText()==u"AΩŻZ","UTF-16 edit replacement is incorrect");
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(control(instance,"CCheckBox")->widget),TRUE);host.check();require(checkClicks==1,"GTK check toggling did not dispatch VB Click");
+    gtkNativeToggleSet(control(instance,"CCheckBox")->widget,true);host.check();require(checkClicks==1,"GTK check toggling did not dispatch VB Click");
     control(instance,"CCheckBox")->set(runtime,"value",Value::integer(0));require(checkClicks==2,"Programmatic Value assignment did not dispatch VB Click");
+    gboolean handled=FALSE;
+#if GTK_MAJOR_VERSION >= 4
+    gtk_widget_grab_focus(entry->widget);
+    auto* keys=GTK_EVENT_CONTROLLER_KEY(g_object_get_data(G_OBJECT(entry->widget),"vb6-key-controller"));require(keys!=nullptr,"GTK4 editor has no native key event controller");
+    g_signal_emit_by_name(keys,"key-pressed",GDK_KEY_x,0,GdkModifierType(0),&handled);
+#else
     auto* key=gdk_event_new(GDK_KEY_PRESS);key->key.keyval=GDK_KEY_x;key->key.state=GdkModifierType(0);key->key.string=g_strdup("x");key->key.length=1;key->key.window=gtk_widget_get_window(entry->widget);if(key->key.window)g_object_ref(key->key.window);
-    gboolean handled=FALSE;g_signal_emit_by_name(entry->widget,"key-press-event",&key->key,&handled);gdk_event_free(key);host.check();require(handled&&keyDown==1,"KeyPreview cancellation did not stop native GTK key handling");
-    cancelKeys=false;GdkEventKey unicodeKey{};unicodeKey.type=GDK_KEY_PRESS;unicodeKey.keyval=gdk_unicode_to_keyval(0x4e2d);
+    g_signal_emit_by_name(entry->widget,"key-press-event",&key->key,&handled);gdk_event_free(key);
+#endif
+    host.check();require(handled&&keyDown==1,"KeyPreview cancellation did not stop native GTK key handling");
+    cancelKeys=false;GdkEventKey unicodeKey{};unicodeKey.keyval=gdk_unicode_to_keyval(0x4e2d);
+#if GTK_MAJOR_VERSION < 4
+    unicodeKey.type=GDK_KEY_PRESS;
+#endif
     require(!host.keyEvent(*entry,&unicodeKey,true)&&lastKeyPress==0x4e2d,"Non-Latin key input was swallowed or omitted KeyPress");
     unicodeKey.keyval=gdk_unicode_to_keyval(0x1f600);require(!host.keyEvent(*entry,&unicodeKey,true),"Supplementary Unicode key input was swallowed");
     unicodeKey.keyval=GDK_KEY_AudioRaiseVolume;require(!host.keyEvent(*entry,&unicodeKey,true),"Unmapped native key was swallowed");
-    auto label=control(instance,"CLabel");GdkEventButton release{};release.type=GDK_BUTTON_RELEASE;release.button=1;
-    g_signal_emit_by_name(label->view,"button-release-event",&release,&handled);host.check();require(labelClicks==1,"Native label event box did not dispatch VB Click");
+#if GTK_MAJOR_VERSION >= 4
+    entry->editSelect(2,1);rewriteKeyPress=true;handled=FALSE;g_signal_emit_by_name(keys,"key-pressed",GDK_KEY_x,0,GdkModifierType(0),&handled);rewriteKeyPress=false;host.check();require(handled&&entry->editText()==u"AΩΩZ","Changed ByRef KeyAscii was not committed through the GTK4 editor boundary");
+#endif
+    auto label=control(instance,"CLabel");
+#if GTK_MAJOR_VERSION >= 4
+    auto* click=GTK_GESTURE_CLICK(g_object_get_data(G_OBJECT(label->widget),"vb6-click-controller"));require(click!=nullptr,"GTK4 label has no native click gesture");g_signal_emit_by_name(click,"released",1,1.0,1.0);
+#else
+    GdkEventButton release{};release.type=GDK_BUTTON_RELEASE;release.button=1;g_signal_emit_by_name(label->view,"button-release-event",&release,&handled);
+#endif
+    host.check();require(labelClicks==1,"Native label event did not dispatch VB Click");
     auto array=std::dynamic_pointer_cast<GtkControlArray>(instance->controls.at("buttons"));array->invoke(runtime,"load",{Arg(Value::integer(5))});gtk_button_clicked(GTK_BUTTON(array->elements.at(5)->widget));host.check();require(arrayIndex==5,"Native control array event omitted Index");auto unloaded=array->elements.at(5);auto staleHandle=unloaded->handle;array->invoke(runtime,"unload",{Arg(Value::integer(5))});require(unloaded->disposed&&!host.control(staleHandle),"Control array unload retained live native handle");expectError(91,[&]{unloaded->get(runtime,"caption");});
     auto canvas=control(instance,"CPictureBox");auto* pixels=cairo_image_surface_create(CAIRO_FORMAT_ARGB32,64,64);auto* cr=cairo_create(pixels);canvas->set(runtime,"backcolor",Value::integer(0xffffff));GtkDrawing pixel=gtkDrawing(*canvas,"pixel");pixel.color=0xff;pixel.coordinates={10,10};gtkAppendDrawing(*canvas,pixel);gtkDraw(*canvas,cr);cairo_surface_flush(pixels);uint32_t actual=0;std::memcpy(&actual,cairo_image_surface_get_data(pixels)+10*cairo_image_surface_get_stride(pixels)+40,4);require(actual==0xffff0000u,"Cairo PSet did not render OLE red correctly");cairo_destroy(cr);cairo_surface_destroy(pixels);
     auto dc=host.api(runtime,"user32.GetDC",{Arg(Value::integer(canvas->handle))});auto pen=host.api(runtime,"gdi32.CreatePen",{Arg(Value::integer(0)),Arg(Value::integer(2)),Arg(Value::integer(0xff))});auto old=host.api(runtime,"gdi32.SelectObject",{Arg(dc),Arg(pen)});require(host.api(runtime,"gdi32.DeleteObject",{Arg(pen)}).integral()==0,"Selected GDI pen was deleted");host.api(runtime,"gdi32.MoveToEx",{Arg(dc),Arg(Value::integer(2)),Arg(Value::integer(2)),Arg(Value::integer(0))});host.api(runtime,"gdi32.LineTo",{Arg(dc),Arg(Value::integer(20)),Arg(Value::integer(20))});host.api(runtime,"gdi32.SelectObject",{Arg(dc),Arg(old)});require(host.api(runtime,"gdi32.DeleteObject",{Arg(pen)}).integral()==1,"Unselected GDI pen did not release");require(host.api(runtime,"user32.ReleaseDC",{Arg(Value::integer(canvas->handle)),Arg(dc)}).integral()==1,"GDI context did not release");require(!host.handles.find(int32_t(dc.integral())),"Released DC handle remained live");
@@ -108,7 +168,7 @@ int main() {
         auto original=gtkLoadPicture(host,bytes);auto filename=cursor?u"gtk-resource-roundtrip.cur":u"gtk-resource-roundtrip.ico";
         host.builtin(frame,"savepicture",{Arg(original),Arg(Value::string(filename))});
         require(readNativeResourceFile(toUTF8(filename))==bytes,"SavePicture changed ICO/CUR frames or hotspot bytes");
-        auto reloaded=std::static_pointer_cast<GtkPicture>(host.builtin(frame,"loadpicture",{Arg(Value::string(filename))}).asObject());
+        auto reloaded=std::static_pointer_cast<vb6::GtkPicture>(host.builtin(frame,"loadpicture",{Arg(Value::string(filename))}).asObject());
         require(reloaded->pictureType==3&&reloaded->cursor==cursor&&(!cursor||(reloaded->hotspotX==3&&reloaded->hotspotY==4)),"ICO/CUR roundtrip lost native picture metadata");
         std::filesystem::remove(toUTF8(filename));
       }
@@ -121,12 +181,31 @@ int main() {
     require(removedEditor->disposed&&!removedEditor->view&&!removedEditor->widget&&!host.control(removedHandle),"Removing a tab left its nested editor alive");
     require(!host.apiTimers.count({removedHandle,int32_t(removedTimer.integral())}),"Destroying a native child retained its API timer");
     expectError(91,[&]{removedEditor->get(runtime,"text");});expectError(91,[&]{removedEditor->set(runtime,"text",Value::string(u"stale"));});
-    auto nodes=control(instance,"CTreeView")->items("nodes");
-    for(int depth=0;depth<=1024;++depth)nodes->invoke(runtime,"add",{Arg(depth?Value::integer(depth):Value::missing()),Arg(Value::integer(4)),Arg(Value::string(u"")),Arg(Value::string(u"node"))});
+    auto tree=control(instance,"CTreeView");auto nodes=tree->items("nodes");
+    for(int depth=0;depth<2;++depth)nodes->invoke(runtime,"add",{Arg(depth?Value::integer(depth):Value::missing()),Arg(Value::integer(4)),Arg(Value::string(u"")),Arg(Value::string(u"node"))});
+    checkNativeTree(*tree,nodes->values);
+    // Seed only the intermediate fixture data in linear time. Rebuilding every
+    // progressively deeper GtkTreeStore and every row's full GtkTreePath makes
+    // setup cubic under QEMU. Public Add still creates the ordinary nodes and
+    // the exact depth-limit node, publishing the complete real native model.
+    for(int depth=2;depth<1024;++depth){
+      auto ancestor=std::make_shared<GtkItem>();ancestor->owner=tree;ancestor->collection=nodes;ancestor->kind="nodes";
+      ancestor->identity=nodes->nextIdentity++;ancestor->properties=nodes->values.front()->properties;
+      ancestor->parent=nodes->values.back();nodes->values.back()->children.push_back(ancestor);nodes->values.push_back(std::move(ancestor));
+    }
+    nodes->invoke(runtime,"add",{Arg(Value::integer(1024)),Arg(Value::integer(4)),Arg(Value::string(u"")),Arg(Value::string(u"boundary node"))});
+    require(nodes->values.size()==1025,"Public TreeView Add did not accept the exact supported depth");checkNativeTree(*tree,nodes->values);
+    auto* boundaryModel=tree->model;
     for(int attempt=0;attempt<3;++attempt)expectError(7,[&]{nodes->invoke(runtime,"add",{Arg(Value::integer(1025)),Arg(Value::integer(4)),Arg(Value::string(u"")),Arg(Value::string(u"too deep"))});});
-    require(nodes->values.size()==1025&&nodes->values.back()->children.empty(),"Rejected TreeView Add mutated the node collection");
-    nodes->invoke(runtime,"remove",{Arg(Value::integer(1))});require(nodes->values.empty(),"Removing a deep tree retained descendants");
-    gboolean cancelled=FALSE;g_signal_emit_by_name(form->window,"delete-event",nullptr,&cancelled);host.check();require(cancelled&&instance->loaded&&queryCount==1&&unloadCount==0,"QueryUnload cancellation destroyed the GTK form");
+    require(nodes->values.size()==1025&&nodes->values.back()->children.empty()&&tree->model==boundaryModel,"Rejected TreeView Add mutated the node collection or native model");checkNativeTree(*tree,nodes->values);
+    nodes->invoke(runtime,"remove",{Arg(Value::integer(1))});require(nodes->values.empty(),"Removing a deep tree retained descendants");checkNativeTree(*tree,nodes->values);
+    gboolean cancelled=FALSE;
+#if GTK_MAJOR_VERSION >= 4
+    g_signal_emit_by_name(form->window,"close-request",&cancelled);
+#else
+    g_signal_emit_by_name(form->window,"delete-event",nullptr,&cancelled);
+#endif
+    host.check();require(cancelled&&instance->loaded&&queryCount==1&&unloadCount==0,"QueryUnload cancellation destroyed the GTK form");
     auto modalInstance=runtime.instance(modal.name);runtime.load(modalInstance);host.formCall(modalInstance,"show",{Arg(Value::integer(1)),Arg(Value::object(instance))});require(!modalInstance->loaded&&modalTicks==1&&instance->loaded,"Modal nested loop failed to unwind after timer unload");
     auto moduleInstance=runtime.instance(callbacks.name);auto callback=Value::object(std::make_shared<NativeCallback>(moduleInstance,"ontimer"));
     auto nativeTimer=host.api(runtime,"user32.SetTimer",{Arg(Value::integer(form->surface->handle)),Arg(Value::integer(0)),Arg(Value::integer(10)),Arg(callback)});require(nativeTimer.integral()>0,"SetTimer did not register native callback");

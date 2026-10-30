@@ -73,9 +73,13 @@ class WinUI(unittest.TestCase):
   self.assertEqual(self.errors,[])
   self.assertEqual([u for u in self.requests if u.startswith(('http:','https:')) and not u.startswith(self.base)],[])
  def load(self,page,path):
-  if MEMORY:page.set_content(path.read_text())
-  elif TRANSPORT == 'file':page.goto(path.as_uri())
-  else:page.goto(self.base+str(path.relative_to(ROOT)))
+  # The standalone IDE includes the editor and compiler. Bound its startup
+  # separately; small runtime fixtures keep their existing load deadline.
+  is_ide=path==ROOT/'dist/VB6-Studio-Web.html'
+  if MEMORY:page.set_content(path.read_text(),**({'timeout':60000} if is_ide else {}))
+  else:
+   options={'wait_until':'commit','timeout':60000} if is_ide else {}
+   page.goto(path.as_uri() if TRANSPORT == 'file' else self.base+str(path.relative_to(ROOT)),**options)
  def park_pointer(self):
   # Keep press/release and hit testing inside the viewport. Two distinct
   # interior movements send a real pointer transition even when already parked;
@@ -204,7 +208,7 @@ class WinUI(unittest.TestCase):
    self.theme('classic');self.theme(theme)
    self.assertEqual(text.input_value(),'WinUI state editing');self.assertEqual(text.evaluate('e=>[e.selectionStart,e.selectionEnd]'),[2,7])
    self.set('TextBox1','Enabled',0);self.expect_color(text,'backgroundColor',r['disabled'])
-   self.expect_color(text,'color','#fefefe5d' if theme.endswith('dark') else r['disabledInk'])
+   self.expect_color(text,'color','#fefefe5d' if theme.endswith('dark') else '#0101015c')
    self.record(theme=theme,textAndSelectionRetained=True)
  def test_authored_rgb_fonts_and_outer_geometry_are_not_rewritten(self):
   command=self.node('cmdRGB');text=self.node('TextBox1').locator('input')
@@ -343,14 +347,14 @@ class WinUI(unittest.TestCase):
     self.assertEqual(*samples,theme+' disabled state '+str(checked))
    self.record(theme=theme,disabledGlyphsUnchanged=True)
  def ide(self,theme):
-  # Exercise a real live palette switch instead of reloading an 11-MB IDE for
+  # Exercise a real live palette switch instead of reloading the IDE for
   # every color scheme. Cancel the previous draft through its real UI first.
   if self.page.evaluate('typeof vb6Studio === "object"'):
    self.page.locator('.ide-dialog-footer').get_by_role('button',name='Cancel',exact=True).click()
    self.page.wait_for_selector('.ide-dialog',state='detached')
   else:
    self.load(self.page,ROOT/'dist/VB6-Studio-Web.html')
-   self.page.wait_for_function('typeof vb6Studio === "object"')
+   self.page.wait_for_function('typeof vb6Studio === "object"',timeout=60000)
    self.page.evaluate('globalThis.winuiFixtureIdentity={studio:vb6Studio,project:vb6Studio.project}')
   self.page.evaluate('t=>{Object.assign(vb6Studio.appearance,{theme:t,reduceMotion:true});vb6Studio.applyAppearance();void vb6Studio.command("options");}',theme)
   self.page.wait_for_selector('.ide-dialog')

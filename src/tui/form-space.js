@@ -1,4 +1,5 @@
 import {readControlPaintProperties} from '../rendering/invalidation.js';
+import {leaseDesignerGrid} from '../rendering/designer-grid.js';
 import {mnemonic} from './cells.js';
 
 /** A uniform presentation-space expansion: no twips/property/layout mutation,
@@ -27,16 +28,22 @@ export function formCellMetrics(node,settings){
   return {...settings,cellWidth:settings.cellWidth/scale.x,cellHeight:settings.cellHeight/scale.y};
 }
 export class TuiFormSpace {
-  constructor(owner){this.owner=owner;this.entries=new Map();this.dirty=true;}
-  configure(){this.dirty=true;}
+  constructor(owner){this.owner=owner;this.entries=new Map();this.grids=new Map();this.dirty=true;this.flushing=false;this.disposed=false;}
+  configure(){if(!this.disposed)this.dirty=true;}
   flush(){
-    if(!this.dirty)return;this.dirty=false;
+    if(this.disposed||!this.dirty||this.flushing)return;
+    this.flushing=true;this.dirty=false;
+    try {this.flushForms();}
+    finally {this.flushing=false;if(this.dirty&&!this.disposed)this.owner.requestPaint?.();}
+  }
+  flushForms(){
     const owner=this.owner,enabled=owner.settings.formLayout==='readable';
     const roots=[owner.root,...owner.portals.keys()];
     const forms=roots.flatMap(root=>[...(root.matches('.vb-form')?[root]:[]),...root.querySelectorAll('.vb-form')]).filter(n=>owner.owns(n));
-    for(const form of [...this.entries.keys()])if(!enabled||!form.isConnected||!forms.includes(form))this.remove(form);
-    if(!enabled)return;
-    for(const form of forms){
+    for(const form of [...this.entries.keys()])if(!enabled||!form.isConnected||!forms.includes(form)){
+      this.remove(form);if(this.disposed)return;
+    }
+    if(enabled)for(const form of forms){
       let entry=this.entries.get(form);
       if(!entry){
         entry={scale:{x:1,y:1},styles:new Map(),marker:form.getAttribute('data-tui-form-space'),plane:form.closest('.designer-plane'),window:form.closest('.mdi-window')};
@@ -73,7 +80,25 @@ export class TuiFormSpace {
         for(const node of owner.controls.keys())if(form.contains(node))owner.dirty.add(node);
         owner.chrome.invalidate(form);
         form.dispatchEvent(new owner.view.CustomEvent('vb-presentation-geometry',{bubbles:true}));
+        if(this.disposed)return;
       }
+    }
+    const cellGrid=owner.settings.designerGrid==='cells';
+    for(const [form,lease]of this.grids)if(!cellGrid||!forms.includes(form)||!form.matches('.designer-form')){
+      this.grids.delete(form);lease.dispose();if(this.disposed)return;
+    }
+    if(cellGrid)for(const form of forms)if(form.matches('.designer-form')){
+      const local=formCellMetrics(form,owner.settings),value={columnWidth:local.cellWidth,rowHeight:local.cellHeight};
+      const lease=this.grids.get(form);
+      if(lease)lease.update(value);
+      else {
+        const next=leaseDesignerGrid(form,value);
+        // A geometry listener can synchronously dispose its presentation while
+        // registration is notifying, before the returned lease can be stored.
+        if(this.disposed){next.dispose();return;}
+        this.grids.set(form,next);
+      }
+      if(this.disposed)return;
     }
   }
   set(entry,node,key,value){
@@ -88,5 +113,13 @@ export class TuiFormSpace {
     if(leases.get(form)===entry)leases.delete(form);
     this.entries.delete(form);form.dispatchEvent(new this.owner.view.CustomEvent('vb-presentation-geometry',{bubbles:true}));
   }
-  dispose(){for(const form of [...this.entries.keys()])this.remove(form);}
+  dispose(){
+    if(this.disposed)return;this.disposed=true;this.dirty=false;
+    const grids=[...this.grids.values()];this.grids.clear();let failure;
+    // Unpublish ownership before callbacks and complete every retirement even
+    // if one synchronous notification fails. A second dispose stays harmless.
+    for(const lease of grids)try{lease.dispose();}catch(error){failure??=error;}
+    for(const form of [...this.entries.keys()])try{this.remove(form);}catch(error){failure??=error;}
+    if(failure)throw failure;
+  }
 }

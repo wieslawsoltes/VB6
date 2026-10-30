@@ -2,8 +2,9 @@
  * All project control flow is machine code. Helpers implement language values,
  * never consume a project opcode stream, and never throw across these frames. */
 import {BinarySection} from '../../../src/native/binary-section.js';
+import {ARM64,linkARM64} from '../../../src/native/arm64.js';
 import {aotOptimizationLevel,optimizeAOTOperations} from '../../macos-native/src/aot-optimizer.js';
-import {LINUX_LIMITS} from './target.js';
+import {LINUX_LIMITS,linuxTarget} from './target.js';
 const integer=(value,min,max)=>{if(!Number.isSafeInteger(value)||value<min||value>max)throw new RangeError('Invalid x86_64 immediate or displacement');return value;};
 const register=value=>integer(value,0,15);
 const reg={rax:0,rcx:1,rdx:2,rsp:4,rbp:5,rsi:6,rdi:7,r8:8,r9:9,r12:12,r13:13};
@@ -71,10 +72,27 @@ function emitFunction(f,a,level){
   }
   a.label(label('exit')).leave(frame);return stats;
 }
-export function emitLinuxAOTFunctions(functions,optimization=2){
+/** AAPCS64 passes all eight ABI words in x0..x7. The shared emitter preserves
+ * x19/x20 and FP/LR, aligns/probes its stack, and expands distant conditionals.
+ * ELF helpers omit the Mach-O leading underscore; no instruction ABI changes. */
+export class LinuxARM64AOTAssembler extends ARM64 {
+  constructor(section=new BinarySection('.vb6code',0x6)){super(section);}
+  bl(label){return super.bl(typeof label==='string'?label.replace(/^_vb6_aot_/,'vb6_aot_'):label);}
+}
+export function emitLinuxAOTFunctions(functions,optimization=2,architecture='x64'){
+  if(linuxTarget(architecture).option==='arm64'){
+    const level=aotOptimizationLevel(optimization),assembler=new LinuxARM64AOTAssembler(),stats={level,removedJumps:0,elidedStores:0,forwardedLoads:0};
+    for(const f of functions){const result=f.emit(assembler,level);for(const key of ['removedJumps','elidedStores','forwardedLoads'])stats[key]+=result[key];if(assembler.s.length>LINUX_LIMITS.codeBytes)throw new RangeError('Linux AOT code exceeds 64 MiB');}
+    assembler.s.optimization=Object.freeze(stats);return assembler.s;
+  }
   const level=aotOptimizationLevel(optimization),assembler=new X64AOTAssembler(),stats={level,removedJumps:0,elidedStores:0,forwardedLoads:0};
   for(const f of functions){const result=emitFunction(f,assembler,level);for(const key of ['removedJumps','elidedStores','forwardedLoads'])stats[key]+=result[key];}
   assembler.s.optimization=Object.freeze(stats);return assembler.s;
+}
+export function linkLinuxARM64AOT(section,baseAddress,externalSymbols=new Map()){
+  integer(baseAddress,0,Number.MAX_SAFE_INTEGER);integer(section?.length,16,LINUX_LIMITS.codeBytes);
+  if(baseAddress%16||section.length%4||section.bytes?.length!==section.length||!(section.labels instanceof Map)||!Array.isArray(section.fixups))throw new TypeError('Invalid or misaligned ARM64 AOT section');
+  return linkARM64(section,baseAddress,externalSymbols);
 }
 /** All addresses slide together in an ELF PIE; signed relative calls need no
  * dynamic relocations and never introduce writable executable mappings. */

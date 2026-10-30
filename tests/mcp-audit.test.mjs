@@ -172,9 +172,30 @@ test('audit build: supported owned Variant values produce a native executable',a
 });
 test('audit Linux build: the catalog and schema expose the same native target',async t=>{
  const f=fixture(t),catalog=await tool(f,'build.targets'),target=catalog.targets.find(item=>item.id==='linux');
- assert.ok(target);assert.equal(target.graphics,'GTK 3.24/Cairo');
+ assert.ok(target);assert.equal(target.graphics,'GTK 3.24 or GTK 4.14/Cairo');assert.deepEqual(target.toolkits,['gtk3','gtk4']);assert.equal(target.defaultToolkit,'gtk3');
+ assert.deepEqual(target.architectures,['x64','arm64']);assert.deepEqual(target.packageFormats,['zip','tar.gz','deb','rpm']);
  assert.ok(f.adapter.tools.find(item=>item.name==='vb6.build.create').inputSchema.properties.target.enum.includes('linux'));
  const routes=await tool(f,'commands.list');assert.ok(routes.commands.some(item=>item.id==='exportLinux'&&item.tool==='vb6.build.create'));
+});
+for(const toolkit of ['gtk3','gtk4'])for(const architecture of ['x64','arm64'])for(const format of ['zip','tar.gz','deb','rpm'])test('audit Linux build: '+toolkit+' '+architecture+' '+format+' retains exact native package bytes',async t=>{
+ const f=fixture(t);f.ide.project.modules[0].code='';
+ const result=await tool(f,'build.create',{target:'linux',architecture,toolkit,format,optimization:3,package:{packageName:'mcp-linux-fixture',version:'2.1.0',license:'MIT'},expectedRevision:f.adapter.revision});
+ assert.equal(result.valid,true,JSON.stringify(result));assert.equal(result.report.codegen,architecture==='arm64'?'arm64-aot':'x86_64-aot');assert.equal(result.report.optimization,3);assert.equal(result.report.distribution.format,format);
+ const blocks=[];let offset=0;
+ while(true){const part=await tool(f,'build.read',{artifactId:result.artifact.artifactId,offset,count:262144});blocks.push(Buffer.from(part.data,'base64'));offset=part.nextOffset;if(!part.hasMore)break;}
+ const bytes=Buffer.concat(blocks);assert.equal(createHash('sha256').update(bytes).digest('hex'),result.artifact.sha256);assert.equal(result.report.sha256,result.artifact.sha256);
+ const {exportLinuxDistribution}=await import('../packages/linux-native/src/index.js');
+ assert.equal(result.report.toolkit,toolkit);
+ const expected=await exportLinuxDistribution(clone(f.ide.project),{architecture,toolkit,optimization:3},{format,packageName:'mcp-linux-fixture',version:'2.1.0',license:'MIT'});
+ assert.deepEqual(bytes,Buffer.from(expected.bytes));assert.equal(result.artifact.name,expected.filename);assert.equal(result.artifact.mimeType,expected.mimeType);
+ await tool(f,'build.release',{artifactId:result.artifact.artifactId});
+});
+test('audit Linux build: malformed package metadata and non-Linux options allocate no artifact',async t=>{
+ const f=fixture(t);
+ for(const args of [{target:'project',architecture:'arm64'},{target:'project',toolkit:'gtk4'},{target:'linux',toolkit:'gtk5'},{target:'linux',package:{packageName:'../escape'}},{target:'linux',package:{maintainer:'x\nDepends: evil'}},{target:'linux',architecture:'x86'}]){
+   const response=await modern(f,'tools/call',{name:'vb6.build.create',arguments:{...args,expectedRevision:f.adapter.revision}});
+   assert.equal(response.error.code,-32602);assert.deepEqual(f.adapter.inspectArtifacts(),[]);
+ }
 });
 test('audit Linux build: unsupported native declarations return diagnostics without allocating an artifact',async t=>{
  const f=fixture(t);f.ide.project.modules[0].code='Private Declare Function Missing Lib "unavailable" () As Long\nPrivate Sub Form_Load()\nDebug.Print Missing()\nEnd Sub';

@@ -117,7 +117,13 @@ export function installDesignerLayout(d,ui){
       for(const c of items){const p=c.properties;let x=p.Left,y=p.Top,w=p.Width,h=p.Height;
         if(resize){if(resize.includes('e'))w+=delta.x;if(resize.includes('s'))h+=delta.y;if(resize.includes('w')){x+=delta.x;w-=delta.x;}if(resize.includes('n')){y+=delta.y;h-=delta.y;}}
         else{x+=delta.x;y+=delta.y;}
-        if(!e.altKey&&!state.guides.length){x=d.snap(x);y=d.snap(y);if(resize){w=d.snap(w);h=d.snap(h);}}
+        if(!e.altKey&&!state.guides.length){
+          if(!resize){x=d.snap(x);y=d.snap(y,'y');}
+          else{
+            if(/[ew]/.test(resize)){w=Math.max(15,d.snap(w));if(resize.includes('w'))x=p.Left+p.Width-w;}
+            if(/[ns]/.test(resize)){h=Math.max(15,d.snap(h,'y'));if(resize.includes('n'))y=p.Top+p.Height-h;}
+          }
+        }
         const patch={bounds:{x,y,width:Math.max(15,w),height:Math.max(15,h)}};if(resize&&/[ew]/.test(resize))patch.widthMode='fixed';if(resize&&/[ns]/.test(resize))patch.heightMode='fixed';engine.update(c.id,patch);
       }
       const result=engine.arrange(before.properties.ClientWidth,before.properties.ClientHeight);for(let j=0;j<result.changedCount;j++){const i=result.changed[j],view=views.get(engine.nodes[i].id);if(view){const b=engine.getBounds(view.model.id);Object.assign(view.props,{Left:b.x,Top:b.y,Width:b.width,Height:b.height});view.refresh();}}

@@ -37,9 +37,11 @@ test('Linux target constants override conflicting project defaults without mutat
   const before=structuredClone(input),result=compileLinuxAOT(input);assert.ok(result.metadata.literals.some(v=>v.value==='LINUX_SELECTED'));assert.ok(!result.metadata.literals.some(v=>v.value==='WRONG_TARGET'));assert.deepEqual(input,before);
 });
 test('Linux target validates names, architecture, toolkit and allocation limits',()=>{
-  for(const name of ['','..','-danger','a/b','a\\b','a:b','a\0b','a\nb','a\x7fb'])assert.throws(()=>linuxOptions({name}),LinuxCompileError);
+  for(const name of ['','..','-danger','a/b','a\\b','a:b','a\0b','a\nb','a\x7fb','日'.repeat(86)])assert.throws(()=>linuxOptions({name}),LinuxCompileError);
+  assert.equal(linuxOptions({name:'日'.repeat(85)}).name,'日'.repeat(85));
   assert.equal(linuxOptions({name:'LinuxApp',arch:'x64'}).arch,'x86_64');
-  for(const options of [{arch:'arm64'},{toolkit:'gtk4'},{optimization:4},{maxCallDepth:0},{maxArrayElements:2**32}])assert.throws(()=>linuxOptions(options),LinuxCompileError);
+  assert.equal(linuxOptions({architecture:'arm64'}).architecture,'arm64');
+  for(const options of [{arch:'riscv64'},{toolkit:'gtk5'},{optimization:4},{maxCallDepth:0},{maxArrayElements:2**32}])assert.throws(()=>linuxOptions(options),LinuxCompileError);
 });
 test('Linux catalog rejects unavailable controls and Declares before export',()=>{
   const code='Declare Sub Unsupported Lib "kernel32" Alias "VirtualAlloc" (ByVal n As Long)\nSub Main()\nEnd Sub';
@@ -89,7 +91,7 @@ test('Linux archive provenance verifies actual runtime prefix rather than labels
   await assert.rejects(()=>verifyLinuxAOTArchive(writeLinuxAppZip(files,'LinuxDirect/bin/LinuxDirect'),exported.options),/provenance hash/);
 });
 test('Linux resources cannot escape or replace reserved runtime assets',async()=>{
-  for(const name of ['Resources/../outside','Resources/vb6-build.json','Resources/vb6-assets.bin','Resources/a\\b','Resources/a:b','outside'])await assert.rejects(()=>linkLinuxAOT(compiled,runtime,{resources:{[name]:'bad'}}),/resource path/);
+  for(const name of ['Resources/../outside','Resources/vb6-build.json','Resources/vb6-assets.bin','Resources/vb6-runtime-license.txt','Resources/a\\b','Resources/a:b','outside','Resources/'+'日'.repeat(86),'Resources/'+('a'.repeat(200)+'/').repeat(21)+'file'])await assert.rejects(()=>linkLinuxAOT(compiled,runtime,{resources:{[name]:'bad'}}),/resource path/);
   const result=await linkLinuxAOT(compiled,runtime,{resources:{'Resources/Zażółć.txt':'gęślą jaźń'}});await verifyLinuxAOTArchive(result.bytes,result.options);
 });
 test('ELF runtime manifests reject changed ABI, helpers, dependencies and hashes',async()=>{

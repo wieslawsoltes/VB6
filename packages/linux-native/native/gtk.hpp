@@ -10,6 +10,7 @@
 #include "handles.hpp"
 #include "recordset-grid.hpp"
 #include "resources.hpp"
+#include "gtk-compat.hpp"
 
 namespace vb6 {
 constexpr double GtkTwipsPerPixel = 15.0;
@@ -18,6 +19,7 @@ struct GtkControl;
 struct GtkForm;
 struct GtkItems;
 struct GtkItem;
+struct GtkRichText;
 
 struct GtkPicture final : Object {
   GdkPixbuf* pixels = nullptr;
@@ -89,6 +91,10 @@ struct GtkControl final : Object {
   // view is an owned reference. widget/content are borrowed descendants.
   GtkWidget *view = nullptr, *widget = nullptr, *content = nullptr;
   GtkWidget* menu = nullptr;
+#if GTK_MAJOR_VERSION >= 4
+  GSimpleAction* menuAction = nullptr;
+  GMenu* submenuModel = nullptr;
+#endif
   GtkTreeModel* model = nullptr;
   GtkCssProvider* css = nullptr;
   int32_t handle = 0;
@@ -108,6 +114,7 @@ struct GtkControl final : Object {
   std::optional<RecordsetGridEdit> pendingEdit;
   uint64_t boundSelection = 0;
   std::vector<GtkDrawing> drawings;
+  std::shared_ptr<GtkRichText> richText;
   double currentX = 0, currentY = 0;
   GdkRectangle initialRect{0, 0, 0, 0};
   int initialParentWidth = 0, initialParentHeight = 0;
@@ -168,6 +175,11 @@ struct GtkForm {
   std::shared_ptr<GtkControl> surface;
   GtkWidget *window = nullptr, *box = nullptr, *menuBar = nullptr;
   GtkAccelGroup* accelerators = nullptr;
+#if GTK_MAJOR_VERSION >= 4
+  GSimpleActionGroup* menuActions = nullptr;
+  GMenu* menuModel = nullptr;
+  bool rebuildingMenus = false;
+#endif
   GMainLoop* modalLoop = nullptr;
   bool closing = false, enabled = true, sizing = false;
   int width = 0, height = 0;

@@ -71,6 +71,8 @@ Windows Classic, Windows Standard (2000), and High Contrast Black remain availab
 
 **Tools → Options → General → Appearance → IDE theme** also offers **Fluent WinUI 3**, **macOS 26**, and **X11**, each in light and dark variants. Classic VB6 remains the default. Themes cover IDE chrome, controls, dialogs, tools, editors, debugger and agent/MCP surfaces, including live detached windows. System light/dark matching and reduced transparency/motion are optional; authored application forms and exported runtimes keep their own appearance. See [IDE themes, scope and validation](docs/IDE-THEMES.md).
 
+WinUI XAML forms use a pinned Microsoft resource catalog with typed Light/Dark/HighContrast brushes, scoped resources, supported native styles and live control states. ToggleSwitch, ToggleButton and HyperlinkButton use real existing VB controls, and native property edits retain explicit ownership. See [WinUI XAML compatibility and example](docs/WINUI-XAML-COMPATIBILITY.md), [resource catalog and provenance](docs/WINUI-RESOURCE-CATALOG.md), and [WinUI rendering scope](docs/WINUI-PARITY.md) for supported APIs and explicit limits.
+
 Selecting a macOS application theme exposes macOS 26 appearance and accessibility properties in the designer. XAML can use the versioned `urn:vb6:macos26` vocabulary for Mac-style controls, structured tables/outlines/tabs, and live semantic colors. The same authored properties feed the browser runtime and native AppKit exports, with explicit diagnostics for unsupported native combinations. See [XAML authoring](docs/XAML.md), [macOS theme fidelity](docs/MACOS-THEME-FIDELITY.md), and [native macOS 26 appearance](docs/macos26-native-appearance.md).
 
 **Application Theme** offers the same six optional variants, independently saved with the project and embedded in exported HTML/Electron apps. Designer previews, running forms, MDI children, dialogs, popup lists, controls and drawing system colors update without a theme-only VM/control restart. Authored RGB, fonts, images and geometry remain intact. Each family includes a complete matching original icon pack—111 command names and 40 toolbox types—throughout the IDE, lazy-created and detached windows, and built-in application UI. Classic artwork remains unchanged. See [Application themes](docs/APPLICATION-THEMES.md) and [Matching icon packs](docs/THEME-ICON-PACKS.md).
@@ -179,16 +181,24 @@ See [Direct Win32/AOT contract, examples and SDK](docs/WIN32-AOT.md), [Windows t
 
 ### Native Linux GTK export
 
-**File → Make Project (Linux GTK AOT)…** produces a native Linux x86-64 ELF application ZIP directly in the IDE, including offline. The shared VB6 native compiler emits project machine code; the application uses GTK 3.24 controls, the portable native VB6 runtime, and system libraries. It runs without Node.js, a browser, Wine, or a VB interpreter.
+**File → Make Project (Linux GTK AOT)…** produces native Linux **x86-64 or ARM64 ELF applications** with **GTK 3.24 or GTK 4.14**, packaged as ZIP, tar.gz, Debian, or RPM directly in the offline IDE. The Linux Node/CLI packager also builds real **AppImage and Flatpak** distributions from the same sealed AOT application. The shared VB6 compiler emits project machine code; native GTK controls, rich documents, common dialogs, CUPS printing, and the portable VB6 runtime run without Node.js, a browser, Wine, or a VB interpreter.
 
 ```sh
 npm run build:linux-package
 npm run build:linux -- examples/calculator.vb6web --out NativeOutput
+# Build an ARM64 Debian package with a desktop launcher:
+npm run build:linux -- examples/calculator.vb6web --out NativeOutput --architecture arm64 --format deb --package-name my-calculator --version 1.0.0
+# On Linux with the native packaging tools, build a GTK4 AppImage:
+npm run build:linux -- examples/calculator.vb6web --out NativeOutput --toolkit gtk4 --format appimage --package-name my-calculator --version 1.0.0
+# Or produce a Flatpak bundle for the declared GNOME platform:
+npm run build:linux -- examples/calculator.vb6web --out NativeOutput --format flatpak --app-id org.example.Calculator
 # Or write a fresh application directory with bin/NAME and Resources/:
 npm run build:linux -- examples/calculator.vb6web --out NativeApplications --extract
 ```
 
-The first runtime targets Ubuntu 24.04-compatible Linux x86-64 with GTK 3.24 and glibc 2.39 or newer. O0–O3 project optimization, native resources, deterministic executable ZIPs, standalone package APIs and the `linux` MCP build target share the same exporter. See [Linux AOT architecture, usage and validation](docs/LINUX-AOT.md) and the [reusable Linux package](packages/linux-native/README.md).
+All four architecture/toolkit payloads target Ubuntu 24.04-compatible native libraries, including glibc 2.39, CUPS, and the selected GTK version. GTK3 remains the default. Applications are fully AOT compiled and dynamically link native libraries; AppImage bundles the non-glibc dependency graph, while Flatpak uses its declared platform runtime. The IDE and `linux` MCP build API retain the four portable/offline formats and advertise the native Linux CLI route for AppImage/Flatpak.
+
+Native CI qualifies both architectures and toolkits, actual X11 and Wayland behavior, rich-document preservation, printer submission, packaged previous-instance identity, and execution of exact browser downloads. Source provenance gates require all four runtime payloads to match the current native sources. See [Linux AOT architecture and APIs](docs/LINUX-AOT.md), [the reusable Linux package](packages/linux-native/README.md), [GTK controls and displays](docs/LINUX-GTK.md), [RichTextBox documents](docs/LINUX-RTF.md), and [AppImage/Flatpak packaging](docs/LINUX-DISTRIBUTION.md).
 
 ### Reusable Win32 browser compatibility
 

@@ -14,13 +14,21 @@ export function projectionGrid(node, columns, rows, metrics = {}) {
   const x = rect.left + (node.clientLeft || 0) * scaleX;
   const y = rect.top + (node.clientTop || 0) * scaleY;
   const pitchX = width * scaleX, pitchY = height * scaleY;
+  // Browser engines quantize DOM rectangles independently (commonly to 1/60
+  // or 1/64 CSS pixel). A few thousandths below the same materialized edge must
+  // not discard its first glyph/header. Genuine scrolling remains unsnapped.
+  const edge=(value,origin,pitch,round)=>{
+    const cell=(value-origin)/pitch,nearest=Math.round(cell);
+    const rounded=round(Math.abs(cell-nearest)*pitch<=1/32?nearest:cell);
+    return rounded===0?0:rounded;
+  };
   return {
     rect, x, y, pitchX, pitchY,
     project(bounds) {
-      const left = Math.floor((bounds.left - x) / pitchX);
-      const top = Math.floor((bounds.top - y) / pitchY);
-      return {x: left, y: top, width: Math.ceil((bounds.right - x) / pitchX) - left,
-        height: Math.ceil((bounds.bottom - y) / pitchY) - top};
+      const left = edge(bounds.left,x,pitchX,Math.floor);
+      const top = edge(bounds.top,y,pitchY,Math.floor);
+      return {x: left, y: top, width: edge(bounds.right,x,pitchX,Math.ceil) - left,
+        height: edge(bounds.bottom,y,pitchY,Math.ceil) - top};
     }
   };
 }
@@ -30,6 +38,25 @@ function visibleRect(element, limit) {
   const rect = element.getBoundingClientRect();
   return rect.width > 0 && rect.height > 0 && rect.bottom > limit.top && rect.top < limit.bottom &&
     rect.right > limit.left && rect.left < limit.right ? rect : null;
+}
+
+/** Descendant scrollports are independent of the outer control. Preserve the
+ * full row origin for text positioning, but clip its paint to actual ownership.
+ */
+function rowClip(element, node, bounds) {
+  let left=bounds.left,top=bounds.top,right=bounds.right,bottom=bounds.bottom;
+  const view=node.ownerDocument.defaultView;
+  for(let parent=element.parentElement;parent&&parent!==node;parent=parent.parentElement){
+    const style=view.getComputedStyle(parent),rect=parent.getBoundingClientRect();
+    const sx=rect.width/Math.max(1,parent.offsetWidth||rect.width),sy=rect.height/Math.max(1,parent.offsetHeight||rect.height);
+    if(/hidden|clip|scroll|auto/.test(style.overflowX)){
+      left=Math.max(left,rect.left+(parent.clientLeft||0)*sx);right=Math.min(right,rect.left+((parent.clientLeft||0)+parent.clientWidth)*sx);
+    }
+    if(/hidden|clip|scroll|auto/.test(style.overflowY)){
+      top=Math.max(top,rect.top+(parent.clientTop||0)*sy);bottom=Math.min(bottom,rect.top+((parent.clientTop||0)+parent.clientHeight)*sy);
+    }
+  }
+  return right>left&&bottom>top?{left,top,right,bottom,width:right-left,height:bottom-top}:null;
 }
 
 /** A paint snapshot of the canonical materialized control, not a second model.
@@ -82,9 +109,19 @@ export function captureControl(node, columns, rows, metrics) {
   const addRow = (element, text = element.textContent || '', selected = false, separator = false) => {
     const rect = visibleRect(element, grid.rect);
     if (!rect) return;
+    const clipped=rowClip(element,node,rect);if(!clipped)return;
     const bounds = grid.project(rect);
+    // Collapsed table borders and transformed DOM rectangles may start at a
+    // half pixel. Row height is independent of that phase: a one-cell row must
+    // not erase the following row merely because its edges straddle the grid.
+    bounds.height=Math.max(1,Math.round(rect.height/grid.pitchY));
     if (bounds.width <= 0 || bounds.height <= 0 || bounds.x >= columns || bounds.y >= rows) return;
-    state.rows.push({...bounds, text, selected, separator, disabled: !!element.disabled || element.getAttribute('aria-disabled') === 'true'});
+    const style=node.ownerDocument.defaultView.getComputedStyle(element);
+    state.rows.push({...bounds,clip:grid.project(clipped),text,selected,separator,
+      kind:element.matches('th,.vb-lv-header>div')?'header':element.tagName==='BUTTON'?'button':'item',
+      focused:element===node.ownerDocument.activeElement,pressed:element.getAttribute('aria-pressed')==='true'||element.matches(':active'),
+      alignment:style.textAlign==='right'?'right':style.textAlign==='center'?'center':'left',
+      disabled:!!element.disabled||!!element.closest('[aria-disabled=true],[disabled]')});
   };
   if (input?.tagName === 'SELECT') {
     state.text = input.selectedOptions?.[0]?.textContent || '';
@@ -93,12 +130,13 @@ export function captureControl(node, columns, rows, metrics) {
     // text is painted instead. Focused selects always retain their native UI.
     for (const option of input.options) addRow(option, option.textContent || '', option.selected);
   } else {
-    const selectors = type === 'Toolbar' || type === 'Data' || type === 'Adodc' || type === 'UpDown'
-      ? 'button,.vb-data-label'
+    const selectors = type === 'Toolbar'
+      ? 'button,.vb-toolbar-separator,.vb-toolbar-placeholder,[data-toolbar-placeholder]'
+      : type === 'Data' || type === 'Adodc' || type === 'UpDown' ? 'button,.vb-data-label'
       : type === 'MonthView' ? '.vb-month-header>span,.vb-month-header>button,th,td'
       : type === 'ComboBox' ? '.vb-combo-option'
       : type === 'ListView' ? '.vb-lv-row>div,.vb-lv-header>div'
-      : 'td:not(.vb-grid-spacer),th,.vb-tree-row,.vb-status-panel,button[role=tab]';
+      : 'td:not(.vb-grid-spacer),th:not(.vb-grid-spacer),.vb-tree-row,.vb-status-panel,button[role=tab]';
     for (const element of owned(node, selectors)) {
       let text = element.textContent || '';
       if(element.matches('.vb-spin-button'))text=node.classList.contains('horizontal')?(element.classList.contains('up')?'►':'◄'):(element.classList.contains('up')?'▲':'▼');
@@ -108,8 +146,11 @@ export function captureControl(node, columns, rows, metrics) {
           (element.getAttribute('aria-expanded') === null ? '├─' : element.getAttribute('aria-expanded') === 'true' ? '[-]' : '[+]') +
           (element.querySelector('.vb-tree-label')?.textContent || text);
       }
+      // Retained toolbar separators are empty, CSS-painted spans. Reuse the
+      // vertical cell separator without promoting them or blank slots to buttons.
+      const separator=element.matches('td,th,.vb-lv-row>div,.vb-lv-header>div')||type==='Toolbar'&&element.classList.contains('vb-toolbar-separator');
       addRow(element, text, row.classList.contains('selected') || row.classList.contains('active') ||
-        row.getAttribute('aria-selected') === 'true', element.matches('td,th,.vb-lv-row>div,.vb-lv-header>div'));
+        row.getAttribute('aria-selected') === 'true', separator);
     }
   }
   return state;

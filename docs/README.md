@@ -11,8 +11,14 @@ These guides describe the implemented system, not complete native VB6 parity.
 - [Architecture and SDK embedding](ARCHITECTURE.md): module boundaries, execution,
   persistence and extension points.
 - [Application export](APPLICATION-EXPORT.md): deployment APIs, modular output, CSP and validation.
-- [Direct Linux GTK AOT export](LINUX-AOT.md): offline x86-64 ELF executable export,
-  native GTK controls, reusable package, resource layout and native validation.
+- [Direct Linux GTK AOT export](LINUX-AOT.md): offline x86-64 and ARM64 ELF export,
+  GTK3/GTK4 selection, reusable package, resources and native validation.
+- [Linux native GTK host](LINUX-GTK.md): controls, events, dialogs, clipboard,
+  printing and X11/Wayland behavior.
+- [Linux rich documents](LINUX-RTF.md): editable RTF pictures, tables, regions,
+  numbering, Unicode selection and transactional preservation boundaries.
+- [Linux AppImage and Flatpak distribution](LINUX-DISTRIBUTION.md): native
+  packaging, dependencies, sandbox settings, signing and executable qualification.
 - [Direct macOS AOT export](MACOS-DIRECT-AOT.md): offline ARM64 executable export,
   reusable Win32 infrastructure, application signing and SDK maintenance.
 - [macOS distribution](MACOS-DISTRIBUTION.md): trusted local Developer ID signing,
@@ -105,6 +111,10 @@ These guides describe the implemented system, not complete native VB6 parity.
 
 - [WinUI 3 resource fidelity](WINUI-PARITY.md): pinned resources, component states,
   boundary isolation, validation and native-pixel limits.
+- [WinUI 3 resource catalog](WINUI-RESOURCE-CATALOG.md): imported dictionaries,
+  typed values, source provenance and unsupported resource diagnostics.
+- [WinUI 3 XAML compatibility](WINUI-XAML-COMPATIBILITY.md): resource scopes,
+  live theme bindings, control presentation and supported compiler behavior.
 - [X11 fidelity](X11-THEME-FIDELITY.md): Motif-inspired paint/state contracts,
   pixel checks, isolation and native-reference certification boundaries.
 - [Classic icons](ICON-AUDIT.md), [classic HTML rendering and attribution](CLASSIC-HTML-RENDERING.md)

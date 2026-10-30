@@ -1,0 +1,94 @@
+/* Typed XAML presentation is attached to the original VB control. No geometry
+   conversion, model replacement or vendor font dependency is introduced here. */
+[data-winui-reduce-motion="true"] {--winui-Duration:0s;--winui-CheckTransition:none;--winui-ProgressIndeterminateAnimation:none;}
+/* Retained paint is the single backing plane, below native input and caption
+   content. Keep the plane within this control even when it uses GPU canvases. */
+.vb-control[data-winui-control]:has(> .graphics-surface) {isolation:isolate;}
+.vb-control[data-winui-control] > .graphics-surface {z-index:-1!important;}
+/* Plain rich-text runs follow the current control presentation. Provenance
+   markers leave every explicit RTF or Sel* field under document ownership. */
+[data-winui-control="RichEditBox"] > .vb-richtext .vb-rich-run[data-rich-inherit~="color"] {color:inherit!important;}
+[data-winui-control="RichEditBox"] > .vb-richtext .vb-rich-run[data-rich-inherit~="fontName"] {font-family:inherit!important;}
+[data-winui-control="RichEditBox"] > .vb-richtext .vb-rich-run[data-rich-inherit~="fontSize"] {font-size:inherit!important;}
+[data-winui-control="RichEditBox"] > .vb-richtext .vb-rich-run[data-rich-inherit~="bold"] {font-weight:inherit!important;}
+.vb-check[data-winui-control="ToggleSwitch"][data-winui-has-header="true"] {
+  display:grid;grid-template-columns:max-content 1fr;grid-template-rows:auto minmax(0,1fr);
+  align-items:center;column-gap:8px;row-gap:4px;
+}
+.vb-winui-switch-header {grid-column:1 / -1;align-self:start;white-space:pre-wrap;overflow:hidden;text-overflow:ellipsis;}
+.vb-check[data-winui-control="ToggleSwitch"] > span:not(.vb-winui-switch-header):not(.vb-winui-focus-ring) {min-width:0;overflow:hidden;text-overflow:ellipsis;}
+.vb-check[data-winui-control="ToggleButton"] {display:flex;align-items:center;justify-content:center;padding:5px 11px 6px;box-sizing:border-box;border-radius:4px;}
+.vb-check[data-winui-control="ToggleButton"] > input[type="checkbox"] {
+  position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:inherit;
+}
+.vb-check[data-winui-control="ToggleButton"] > span {pointer-events:none;position:relative;}
+.vb-winui-focus-ring {display:none!important;position:absolute!important;inset:var(--winui3-focus-inset,-3px);pointer-events:none;z-index:1;box-sizing:border-box;border:2px solid var(--winui-FocusStrokeColorOuter,CanvasText);border-radius:var(--winui-ControlRadius,4px);box-shadow:inset 0 0 0 1px var(--winui-FocusStrokeColorInner,Canvas);}
+[data-winui-custom-focus="true"]:is(:focus-visible,:has(:focus-visible)) > .vb-winui-focus-ring {display:block!important;}
+[data-winui-system-focus="false"],[data-winui-custom-focus="true"] {--winui-FocusOutline:none;--winui-FocusShadow:none;}
+@media (forced-colors:none) {
+  .vb-check[data-winui-control="ToggleButton"] {background:var(--winui-ButtonBackground);color:var(--winui-ButtonForeground);border:1px solid var(--winui-ControlStrokeColorDefault);}
+  .vb-check[data-winui-control="ToggleButton"]:has(> input:checked) {background:var(--winui-AccentButtonBackground);color:var(--winui-AccentButtonForeground);border-color:var(--winui-ControlStrokeColorOnAccentDefault);}
+  .vb-check[data-winui-control="ToggleButton"]:hover:not(.disabled) {background:var(--winui-ButtonBackgroundPointerOver);}
+  .vb-check[data-winui-control="ToggleButton"]:has(> input:checked):hover:not(.disabled) {background:var(--winui-AccentButtonBackgroundPointerOver);}
+  .vb-check[data-winui-control="ToggleButton"]:active:not(.disabled) {background:var(--winui-ButtonBackgroundPressed);color:var(--winui-ButtonForegroundPressed);}
+  .vb-check[data-winui-control="ToggleButton"]:has(> input:checked):active:not(.disabled) {background:var(--winui-AccentButtonBackgroundPressed);color:var(--winui-AccentButtonForegroundPressed);}
+  .vb-check[data-winui-control="ToggleButton"].disabled {background:var(--winui-ButtonBackgroundDisabled);color:var(--winui-ButtonForegroundDisabled);}
+  .vb-check[data-winui-control="ToggleButton"].disabled:has(> input:checked) {background:var(--winui-AccentButtonBackgroundDisabled);color:var(--winui-AccentButtonForegroundDisabled);}
+  .vb-check[data-winui-control="ToggleButton"]:has(> input:focus-visible) {outline:var(--winui-FocusOutline);outline-offset:1px;box-shadow:var(--winui-FocusShadow);}
+  .vb-command[data-winui-control="HyperlinkButton"] {--winui-control-background:transparent;--winui-ButtonElevation:none;--winui-ButtonFlatElevation:none;--winui-control-foreground:var(--vb-link);--winui-BorderPainterContent:none;}
+  .vb-command[data-winui-control="HyperlinkButton"]:hover:not(.disabled) {--winui-control-foreground:var(--winui-TextFillColorSecondary);text-decoration:underline;}
+  .vb-command[data-winui-control="HyperlinkButton"].disabled {--winui-control-foreground:var(--winui-TextFillColorDisabled);}
+  .vb-command[data-winui-style="AccentButtonStyle"] {--winui-control-background:var(--winui-AccentButtonBackground);--winui-control-foreground:var(--winui-AccentButtonForeground);}
+  .vb-command[data-winui-style="AccentButtonStyle"]:hover:not(.disabled) {--winui-control-background:var(--winui-AccentButtonBackgroundPointerOver);}
+  .vb-command[data-winui-style="AccentButtonStyle"]:active:not(.disabled) {--winui-control-background:var(--winui-AccentButtonBackgroundPressed);--winui-control-foreground:var(--winui-AccentButtonForegroundPressed);}
+  .vb-command[data-winui-style="AccentButtonStyle"].disabled {--winui-control-background:var(--winui-AccentButtonBackgroundDisabled);--winui-control-foreground:var(--winui-AccentButtonForegroundDisabled);}
+  .vb-command[data-winui-style="SubtleButtonStyle"] {--winui-control-background:var(--winui-SubtleButtonBackground);--winui-ButtonElevation:none;--winui-ButtonFlatElevation:none;}
+  .vb-command[data-winui-style="SubtleButtonStyle"]:hover:not(.disabled) {--winui-control-background:var(--winui-SubtleButtonBackgroundPointerOver);}
+  .vb-command[data-winui-style="SubtleButtonStyle"]:active:not(.disabled) {--winui-control-background:var(--winui-SubtleButtonBackgroundPressed);}
+  .vb-command[data-winui-style="SubtleButtonStyle"].disabled {--winui-control-background:var(--winui-SubtleButtonBackgroundDisabled);}
+}
+@media (forced-colors:active) {
+  .vb-check[data-winui-control="ToggleButton"] {background:ButtonFace;color:ButtonText;border:1px solid ButtonText;}
+  .vb-check[data-winui-control="ToggleButton"]:has(> input:checked) {background:Highlight;color:HighlightText;forced-color-adjust:none;}
+  .vb-check[data-winui-control="ToggleButton"].disabled {color:GrayText;border-color:GrayText;}
+  .vb-check[data-winui-control="ToggleButton"]:has(> input:focus-visible) {outline:2px solid ButtonText;outline-offset:2px;}
+}
+
+/* Paint belongs to each XAML element. Custom properties otherwise inherit a
+   parent's state brushes into an independently styled nested control. */
+[data-winui-control] {
+  --winui3-active-Background:initial;--winui3-active-Foreground:initial;--winui3-active-BorderBrush:initial;
+  --winui3-Normal-Background:initial;--winui3-Normal-Foreground:initial;--winui3-Normal-BorderBrush:initial;
+  --winui3-PointerOver-Background:initial;--winui3-PointerOver-Foreground:initial;--winui3-PointerOver-BorderBrush:initial;
+  --winui3-Pressed-Background:initial;--winui3-Pressed-Foreground:initial;--winui3-Pressed-BorderBrush:initial;
+  --winui3-Focused-Background:initial;--winui3-Focused-Foreground:initial;--winui3-Focused-BorderBrush:initial;
+  --winui3-Disabled-Background:initial;--winui3-Disabled-Foreground:initial;--winui3-Disabled-BorderBrush:initial;
+  --winui3-Checked-Background:initial;--winui3-Checked-Foreground:initial;--winui3-Checked-BorderBrush:initial;
+  --winui3-CheckedPointerOver-Background:initial;--winui3-CheckedPointerOver-Foreground:initial;--winui3-CheckedPointerOver-BorderBrush:initial;
+  --winui3-CheckedPressed-Background:initial;--winui3-CheckedPressed-Foreground:initial;--winui3-CheckedPressed-BorderBrush:initial;
+  --winui3-CheckedDisabled-Background:initial;--winui3-CheckedDisabled-Foreground:initial;--winui3-CheckedDisabled-BorderBrush:initial;
+  --winui3-Indeterminate-Background:initial;--winui3-Indeterminate-Foreground:initial;--winui3-Indeterminate-BorderBrush:initial;
+  --winui3-IndeterminatePointerOver-Background:initial;--winui3-IndeterminatePointerOver-Foreground:initial;--winui3-IndeterminatePointerOver-BorderBrush:initial;
+  --winui3-IndeterminatePressed-Background:initial;--winui3-IndeterminatePressed-Foreground:initial;--winui3-IndeterminatePressed-BorderBrush:initial;
+  --winui3-IndeterminateDisabled-Background:initial;--winui3-IndeterminateDisabled-Foreground:initial;--winui3-IndeterminateDisabled-BorderBrush:initial;
+}
+
+/* Scoped resource state paint: each property is independent, so a locally
+   overridden brush participates without discarding the other native states. */
+.vb-winui-border {position:absolute!important;display:block!important;box-sizing:border-box;pointer-events:none;z-index:1;
+  -webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);
+  mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);
+  -webkit-mask-composite:xor;mask-composite:exclude;}
+[data-winui-state-paint="true"] {--winui3-active-Background:var(--winui3-Normal-Background, var(--winui3-Normal-Background, var(--winui3-Normal-Background)));--winui3-active-Foreground:var(--winui3-Normal-Foreground, var(--winui3-Normal-Foreground, var(--winui3-Normal-Foreground)));--winui3-active-BorderBrush:var(--winui3-Normal-BorderBrush, var(--winui3-Normal-BorderBrush, var(--winui3-Normal-BorderBrush)));}
+[data-winui-state-paint="true"]:hover:not(.disabled) {--winui3-active-Background:var(--winui3-PointerOver-Background, var(--winui3-Normal-Background, var(--winui3-Normal-Background)));--winui3-active-Foreground:var(--winui3-PointerOver-Foreground, var(--winui3-Normal-Foreground, var(--winui3-Normal-Foreground)));--winui3-active-BorderBrush:var(--winui3-PointerOver-BorderBrush, var(--winui3-Normal-BorderBrush, var(--winui3-Normal-BorderBrush)));}
+[data-winui-state-paint="true"][data-winui-focused-state="true"]:is(:focus,:has(> :focus)):not(.disabled) {--winui3-active-Background:var(--winui3-Focused-Background, var(--winui3-Normal-Background));--winui3-active-Foreground:var(--winui3-Focused-Foreground, var(--winui3-Normal-Foreground));--winui3-active-BorderBrush:var(--winui3-Focused-BorderBrush, var(--winui3-Normal-BorderBrush));}
+[data-winui-state-paint="true"]:active:not(.disabled) {--winui3-active-Background:var(--winui3-Pressed-Background, var(--winui3-PointerOver-Background, var(--winui3-Normal-Background)));--winui3-active-Foreground:var(--winui3-Pressed-Foreground, var(--winui3-PointerOver-Foreground, var(--winui3-Normal-Foreground)));--winui3-active-BorderBrush:var(--winui3-Pressed-BorderBrush, var(--winui3-PointerOver-BorderBrush, var(--winui3-Normal-BorderBrush)));}
+[data-winui-state-paint="true"].disabled {--winui3-active-Background:var(--winui3-Disabled-Background, var(--winui3-Normal-Background, var(--winui3-Normal-Background)));--winui3-active-Foreground:var(--winui3-Disabled-Foreground, var(--winui3-Normal-Foreground, var(--winui3-Normal-Foreground)));--winui3-active-BorderBrush:var(--winui3-Disabled-BorderBrush, var(--winui3-Normal-BorderBrush, var(--winui3-Normal-BorderBrush)));}
+[data-winui-composite-state="true"]:has(> input:checked) {--winui3-active-Background:var(--winui3-Checked-Background, var(--winui3-Normal-Background, var(--winui3-Normal-Background)));--winui3-active-Foreground:var(--winui3-Checked-Foreground, var(--winui3-Normal-Foreground, var(--winui3-Normal-Foreground)));--winui3-active-BorderBrush:var(--winui3-Checked-BorderBrush, var(--winui3-Normal-BorderBrush, var(--winui3-Normal-BorderBrush)));}
+[data-winui-composite-state="true"]:has(> input:checked):hover:not(.disabled) {--winui3-active-Background:var(--winui3-CheckedPointerOver-Background, var(--winui3-Checked-Background, var(--winui3-Normal-Background)));--winui3-active-Foreground:var(--winui3-CheckedPointerOver-Foreground, var(--winui3-Checked-Foreground, var(--winui3-Normal-Foreground)));--winui3-active-BorderBrush:var(--winui3-CheckedPointerOver-BorderBrush, var(--winui3-Checked-BorderBrush, var(--winui3-Normal-BorderBrush)));}
+[data-winui-composite-state="true"]:has(> input:checked):active:not(.disabled) {--winui3-active-Background:var(--winui3-CheckedPressed-Background, var(--winui3-CheckedPointerOver-Background, var(--winui3-Checked-Background, var(--winui3-Normal-Background))));--winui3-active-Foreground:var(--winui3-CheckedPressed-Foreground, var(--winui3-CheckedPointerOver-Foreground, var(--winui3-Checked-Foreground, var(--winui3-Normal-Foreground))));--winui3-active-BorderBrush:var(--winui3-CheckedPressed-BorderBrush, var(--winui3-CheckedPointerOver-BorderBrush, var(--winui3-Checked-BorderBrush, var(--winui3-Normal-BorderBrush))));}
+[data-winui-composite-state="true"]:has(> input:checked).disabled {--winui3-active-Background:var(--winui3-CheckedDisabled-Background, var(--winui3-Disabled-Background, var(--winui3-Normal-Background)));--winui3-active-Foreground:var(--winui3-CheckedDisabled-Foreground, var(--winui3-Disabled-Foreground, var(--winui3-Normal-Foreground)));--winui3-active-BorderBrush:var(--winui3-CheckedDisabled-BorderBrush, var(--winui3-Disabled-BorderBrush, var(--winui3-Normal-BorderBrush)));}
+[data-winui-composite-state="true"]:has(> input:indeterminate) {--winui3-active-Background:var(--winui3-Indeterminate-Background, var(--winui3-Normal-Background, var(--winui3-Normal-Background)));--winui3-active-Foreground:var(--winui3-Indeterminate-Foreground, var(--winui3-Normal-Foreground, var(--winui3-Normal-Foreground)));--winui3-active-BorderBrush:var(--winui3-Indeterminate-BorderBrush, var(--winui3-Normal-BorderBrush, var(--winui3-Normal-BorderBrush)));}
+[data-winui-composite-state="true"]:has(> input:indeterminate):hover:not(.disabled) {--winui3-active-Background:var(--winui3-IndeterminatePointerOver-Background, var(--winui3-Indeterminate-Background, var(--winui3-Normal-Background)));--winui3-active-Foreground:var(--winui3-IndeterminatePointerOver-Foreground, var(--winui3-Indeterminate-Foreground, var(--winui3-Normal-Foreground)));--winui3-active-BorderBrush:var(--winui3-IndeterminatePointerOver-BorderBrush, var(--winui3-Indeterminate-BorderBrush, var(--winui3-Normal-BorderBrush)));}
+[data-winui-composite-state="true"]:has(> input:indeterminate):active:not(.disabled) {--winui3-active-Background:var(--winui3-IndeterminatePressed-Background, var(--winui3-IndeterminatePointerOver-Background, var(--winui3-Indeterminate-Background, var(--winui3-Normal-Background))));--winui3-active-Foreground:var(--winui3-IndeterminatePressed-Foreground, var(--winui3-IndeterminatePointerOver-Foreground, var(--winui3-Indeterminate-Foreground, var(--winui3-Normal-Foreground))));--winui3-active-BorderBrush:var(--winui3-IndeterminatePressed-BorderBrush, var(--winui3-IndeterminatePointerOver-BorderBrush, var(--winui3-Indeterminate-BorderBrush, var(--winui3-Normal-BorderBrush))));}
+[data-winui-composite-state="true"]:has(> input:indeterminate).disabled {--winui3-active-Background:var(--winui3-IndeterminateDisabled-Background, var(--winui3-Disabled-Background, var(--winui3-Normal-Background)));--winui3-active-Foreground:var(--winui3-IndeterminateDisabled-Foreground, var(--winui3-Disabled-Foreground, var(--winui3-Normal-Foreground)));--winui3-active-BorderBrush:var(--winui3-IndeterminateDisabled-BorderBrush, var(--winui3-Disabled-BorderBrush, var(--winui3-Normal-BorderBrush)));}

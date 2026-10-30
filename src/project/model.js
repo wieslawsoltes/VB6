@@ -1,3 +1,4 @@
+import {validateWinUI3Properties} from '../theme/winui3-compat.js';
 import {validateMacOS26Properties} from '../theme/macos26-compat.js';
 import {WEB_BROWSER_DEFAULTS,isWebBrowser} from '../controls/webbrowser-contract.js';
 import {normalizeApplicationAppearance} from '../theme/application-appearance.js';
@@ -30,7 +31,7 @@ function validateForm(form,moduleName){
     if(isWebBrowser(node.type)&&node.type!=='WebBrowser'){node.originalType ||= node.type;node.type='WebBrowser';}
     if(!node.id||ids.has(node.id))node.id=newId();ids.add(node.id);node.properties ||= {};
     if(typeof node.properties!=='object'||Array.isArray(node.properties))throw new VBError('Invalid properties: '+node.name,1002);
-    try{validateMacOS26Properties(node.properties,node.type);}catch(error){throw new VBError(node.name+': '+error.message,380);}
+    try{validateMacOS26Properties(node.properties,node.type);validateWinUI3Properties(node.properties,node.type);}catch(error){throw new VBError(node.name+': '+error.message,380);}
     for(const key of ['Left','Top','Width','Height','ClientWidth','ClientHeight'])if(node.properties[key]!==undefined){const n=Number(node.properties[key]);if(!Number.isFinite(n)||Math.abs(n)>300000||/Width|Height/.test(key)&&n<0)throw new VBError('Invalid geometry: '+node.name+'.'+key,380);node.properties[key]=n;}
   };
   validateNode(form);

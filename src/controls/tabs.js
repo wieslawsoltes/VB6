@@ -22,6 +22,7 @@ export function browserTabEntries(view) {
 
 export function buildTabs(view) {
   view._pageChildren = [];
+  view._tabButtons = new Map();
   view.node.classList.add('vb-tabs');
   view.node.classList.toggle('vb-sstab', view.type === 'SSTab');
   view.tabHeader = el('div', {class: 'vb-tab-header', role: 'tablist', 'aria-label': view.model.name + ' pages'});
@@ -29,7 +30,10 @@ export function buildTabs(view) {
   view.node.append(view.tabHeader, view.childHost);
   if (view.type === 'TabStrip') {
     view.Tabs = new TabItems(() => view.invalidate());
-    for (const tab of tabEntries(state(view))) view.Tabs.Add(undefined, tab.Key, tab.Caption, tab.Image);
+    for (const tab of tabEntries(state(view))) {
+      const item = view.Tabs.Add(undefined, tab.Key, tab.Caption, tab.Image);
+      for (const key of ['Enabled', 'Visible', 'ToolTipText']) if (tab[key] !== undefined) item[key] = tab[key];
+    }
   } else {
     Object.defineProperty(view, 'Tabs', {enumerable: true, get: () => getTabProperty(view, 'Tabs'), set: value => setTabProperty(view, 'Tabs', value)});
     for (const [name, key] of indexed) {
@@ -40,6 +44,7 @@ export function buildTabs(view) {
       });
     }
   }
+  view.SetFocus = () => (view.tabHeader.querySelector('button[tabindex]:not([tabindex="-1"]):not(:disabled)') || view.tabHeader.querySelector('button:not(:disabled)') || view.node).focus({preventScroll: true});
   view.tabHeader.addEventListener('click', event => {
     const button = event.target.closest('[data-tab-index]');
     if (!button || !view.tabHeader.contains(button) || view.design || !acceptsInput(view)) return;
@@ -49,12 +54,13 @@ export function buildTabs(view) {
     setTabProperty(view, 'Tab', page);
   });
   view.tabHeader.addEventListener('keydown', event => {
-    if (view.design || !acceptsInput(view)) return;
+    if (view.design || event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.altKey || event.ctrlKey || event.metaKey || !acceptsInput(view)) return;
     const entries = browserTabEntries(view), pages = entries.map((entry, i) => ({entry, i})).filter(({entry}) => entry.Enabled !== false && entry.Enabled !== 0 && entry.Visible !== false && entry.Visible !== 0).map(({i}) => i);
-    let at = pages.indexOf(Number(view.props.Tab || 0));
+    let at = Math.max(0, pages.indexOf(Number(event.target.closest('[data-tab-index]')?.dataset.tabIndex ?? view.props.Tab ?? 0)));
     if (!pages.length) return;
-    if (['ArrowRight', 'ArrowDown'].includes(event.key)) at = (at + 1) % pages.length;
-    else if (['ArrowLeft', 'ArrowUp'].includes(event.key)) at = (at + pages.length - 1) % pages.length;
+    const vertical = Number(view.props.TabOrientation) >= 2, rtl = view.node.ownerDocument.defaultView.getComputedStyle(view.node).direction === 'rtl';
+    if (event.key === (vertical ? 'ArrowDown' : rtl ? 'ArrowLeft' : 'ArrowRight')) at = (at + 1) % pages.length;
+    else if (event.key === (vertical ? 'ArrowUp' : rtl ? 'ArrowRight' : 'ArrowLeft')) at = (at + pages.length - 1) % pages.length;
     else if (event.key === 'Home') at = 0;
     else if (event.key === 'End') at = pages.length - 1;
     else return;
@@ -156,40 +162,57 @@ export function refreshTabs(view, image = () => '') {
   const entries = browserTabEntries(view), active = Math.max(0, Math.min(entries.length - 1, Number(view.props.Tab || 0)));
   const visible = entries.map((entry, index) => ({entry, index})).filter(({entry}) => view.design || entry.Visible !== false && entry.Visible !== 0);
   const orientation = Math.max(0, Math.min(3, Number(view.props.TabOrientation) || 0)), vertical = orientation >= 2;
-  const perRow = Math.max(1, Math.min(32767, Number(view.props.TabsPerRow) || (view.type === 'SSTab' ? 3 : Math.max(1, visible.length))));
+  const explicitSegments = view.props.MacOSControlStyle === 'segmented';
+  const perRow = explicitSegments ? Math.max(1, visible.length) : Math.max(1, Math.min(32767, Number(view.props.TabsPerRow) || (view.type === 'SSTab' ? 3 : Math.max(1, visible.length))));
   const rows = Math.max(1, Math.ceil(visible.length / perRow)), height = Math.max(18, Number(view.props.TabHeight ?? 360) / 15);
   if (view.node.dataset.tabOrientation !== String(orientation)) view.node.dataset.tabOrientation = String(orientation);
   tabAttribute(view.tabHeader, 'aria-orientation', vertical ? 'vertical' : 'horizontal');
-  const segmented = view.type === 'TabStrip' && orientation === 0;
-  const track = segmented ? 'var(--detail-strip-column, minmax(0, 1fr))' : 'minmax(0, 1fr)';
-  Object.assign(view.tabHeader.style, {gridTemplateColumns: vertical ? `repeat(${rows}, ${height}px)` : `repeat(${Math.min(perRow, Math.max(1, visible.length))}, ${track})`, gridTemplateRows: vertical ? `repeat(${Math.min(perRow, Math.max(1, visible.length))}, minmax(0, 1fr))` : `repeat(${rows}, ${height}px)`, gridAutoFlow: vertical ? 'column' : 'row', height: vertical ? '100%' : rows * height + 'px', width: vertical ? rows * height + 'px' : segmented ? 'var(--detail-strip-width, 100%)' : '100%'});
+  const segmented = explicitSegments || view.type === 'TabStrip' && orientation === 0;
+  const track = segmented && !explicitSegments ? 'var(--detail-strip-column, minmax(0, 1fr))' : 'minmax(0, 1fr)';
+  Object.assign(view.tabHeader.style, {gridTemplateColumns: vertical ? `repeat(${rows}, ${height}px)` : `repeat(${Math.min(perRow, Math.max(1, visible.length))}, ${track})`, gridTemplateRows: vertical ? `repeat(${Math.min(perRow, Math.max(1, visible.length))}, minmax(0, 1fr))` : `repeat(${rows}, ${height}px)`, gridAutoFlow: vertical ? 'column' : 'row', height: vertical ? '100%' : rows * height + 'px', width: vertical ? rows * height + 'px' : segmented && !explicitSegments ? 'var(--detail-strip-width, 100%)' : '100%'});
   view.node.classList.toggle('vb-tab-property-pages', Number(view.props.Style) === 1);
-  const signature = JSON.stringify([visible.map(({entry, index}) => [index, entry.Caption, entry.Enabled, entry.Visible, entry.Picture, entry.Image]), view.design]);
-  if (signature !== view._tabSignature) {
-    view._tabSignature = signature;
-    const buttons = visible.map(({entry, index}) => {
-      const caption = stripMnemonic(entry.Caption), button = el('button', {type: 'button', class: 'vb-tab-button', id: `tab-${view.model.id}-${index}`, role: 'tab', 'data-tab-index': index, 'aria-controls': view.childHost.id, 'aria-label': caption});
-      if (view.design && view.type === 'SSTab') button.dataset.designerTab = String(index);
-      button.disabled = !view.design && (entry.Enabled === false || entry.Enabled === 0);
-      button.classList.toggle('vb-design-hidden-tab', view.design && (entry.Visible === false || entry.Visible === 0));
-      const picture = image(entry.Picture);
-      if (picture) button.append(el('img', {src: picture, alt: '', class: 'vb-tab-picture'}));
-      button.append(el('span', {}, caption));
-      return button;
-    });
-    const focused = view.tabHeader.contains(view.node.ownerDocument.activeElement) ? view.node.ownerDocument.activeElement?.dataset.tabIndex : null;
-    view.tabHeader.replaceChildren(...buttons);
-    if (focused != null) view.tabHeader.querySelector(`[data-tab-index="${focused}"]`)?.focus();
+  const focused = view.node.ownerDocument.activeElement, headerFocus = view.tabHeader.contains(focused);
+  const keyFor = (entry, index) => view.type === 'TabStrip' ? entry : index;
+  const keys = new Set(entries.map(keyFor));
+  for (const [key, button] of view._tabButtons) if (!keys.has(key)) {button.remove(); view._tabButtons.delete(key);}
+  let ordinal = 0;
+  for (const {entry, index} of visible) {
+    const key = keyFor(entry, index), caption = stripMnemonic(entry.Caption);
+    let button = view._tabButtons.get(key);
+    if (!button) {
+      button = el('button', {type: 'button', class: 'vb-tab-button', role: 'tab'});
+      button.append(el('span')); view._tabButtons.set(key, button);
+    }
+    if (view.tabHeader.children[ordinal] !== button) view.tabHeader.insertBefore(button, view.tabHeader.children[ordinal] || null);
+    ordinal++;
+    tabAttribute(button, 'id', `tab-${view.model.id}-${index}`);
+    tabAttribute(button, 'data-tab-index', index);
+    tabAttribute(button, 'aria-controls', view.childHost.id);
+    tabAttribute(button, 'aria-label', caption);
+    if (view.design && view.type === 'SSTab') tabAttribute(button, 'data-designer-tab', index);
+    button.disabled = !view.design && (!truth(view.props.Enabled) || entry.Enabled === false || entry.Enabled === 0);
+    button.classList.toggle('vb-design-hidden-tab', view.design && (entry.Visible === false || entry.Visible === 0));
+    if (button.title !== String(entry.ToolTipText || '')) button.title = String(entry.ToolTipText || '');
+    const label = button.querySelector('span');
+    if (label.textContent !== caption) label.textContent = caption;
+    const picture = image(entry.Picture), previous = button.querySelector('img');
+    if (picture) {if (previous) {if (previous.getAttribute('src') !== picture) previous.src = picture;} else button.prepend(el('img', {src: picture, alt: '', class: 'vb-tab-picture'}));}
+    else previous?.remove();
   }
+  while (view.tabHeader.children.length > visible.length) view.tabHeader.lastElementChild.remove();
+  const selectable = visible.filter(({entry}) => entry.Enabled !== false && entry.Enabled !== 0);
+  const focusPage = selectable.find(({index}) => index === active)?.index ?? selectable[0]?.index;
+  if (view.node.tabIndex !== -1) view.node.tabIndex = -1;
   for (const button of view.tabHeader.children) {
     const selected = Number(button.dataset.tabIndex) === active;
     button.classList.toggle('active', selected);
     tabAttribute(button, 'aria-selected', selected);
-    const tabIndex = !view.design && selected && truth(view.props.TabStop) ? 0 : -1;
+    const tabIndex = !view.design && !button.disabled && Number(button.dataset.tabIndex) === focusPage && truth(view.props.TabStop) ? Number(view.props.TabIndex) || 0 : -1;
     if (button.tabIndex !== tabIndex) button.tabIndex = tabIndex;
     const maxWidth = Number(view.props.TabMaxWidth || 0);
     button.style.maxWidth = !vertical && maxWidth > 0 ? maxWidth / 15 + 'px' : '';
   }
+  if (headerFocus && (!focused.isConnected || focused.disabled)) view.SetFocus();
   tabAttribute(view.childHost, 'aria-labelledby', `tab-${view.model.id}-${active}`);
   for (const child of view._pageChildren || []) {
     const hidden = child._tabPage !== active || !view.design && (!truth(child.props.Visible) || ['Timer', 'ImageList', 'CommonDialog'].includes(child.type));

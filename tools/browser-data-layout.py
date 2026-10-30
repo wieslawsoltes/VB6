@@ -19,8 +19,9 @@ with sync_playwright() as pw:
             page.set_default_timeout(8000)
             errors = []
             page.on('pageerror', lambda error: errors.append(str(error)))
-            page.set_content((ROOT / 'dist/VB6-Studio-Web.html').read_text())
-            page.wait_for_function('globalThis.vb6Studio')
+            # Full IDE parsing is separate from the eight-second action deadline.
+            page.set_content((ROOT / 'dist/VB6-Studio-Web.html').read_text(),wait_until='domcontentloaded',timeout=60000)
+            page.wait_for_function('globalThis.vb6Studio',timeout=60000)
             page.evaluate('vb6Studio.command("dataEnvironment")')
             tool = page.locator('.data-environment')
             tool.get_by_role('button', name='Add Connection', exact=True).click()

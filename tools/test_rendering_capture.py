@@ -216,5 +216,143 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(page.calls, [])
 
 
+class TranslucentCaptureTests(unittest.TestCase):
+    """Exercise the production acceptance caller, including its strict comparison."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.output = Path(self.directory.name)
+        source = Path(__file__).with_name('browser-rendering-tests.py').read_text()
+        functions = [node for node in ast.walk(ast.parse(source))
+                     if isinstance(node, ast.FunctionDef) and node.name in {'stable_render_capture', 'translucent_paint'}]
+        self.assertEqual(len(functions), 2)
+        self.namespace = {
+            'OUT': self.output, 'json': json, 'check': self.assertTrue,
+            'PlaywrightTimeoutError': ScreenshotTimeout,
+            'pixels': lambda a, b: {'changedPixels': int(a != b)},
+            'browser': object(), 'REQUIRED': ['webgpu'],
+        }
+        exec(compile(ast.Module(body=functions, type_ignores=[]), str(Path(__file__)), 'exec'), self.namespace)
+
+    def run_case(self, images=None, creation_error=None):
+        images = {'html': [b'baseline'], 'webgpu': [b'baseline'], **(images or {})}
+        events = self.events = []
+
+        class Page:
+            def __init__(self):
+                self.backend = 'html'
+                self.indices = {}
+                self.errors = []
+
+            def evaluate(self, expression, argument=None):
+                if 'document.body.innerHTML=' in expression:
+                    events.append(('fixture',)); self.backend = 'html'
+                elif argument is not None:
+                    events.append(('switch', argument)); self.backend = argument
+                elif expression == 'r.backend':
+                    return self.backend
+                elif expression == 'r.dispose();undefined':
+                    events.append(('dispose',))
+
+            def screenshot(self, **options):
+                backend = self.backend
+                index = self.indices.get(backend, 0)
+                self.indices[backend] = index + 1
+                events.append(('capture', backend, options))
+                action = images[backend][min(index, len(images[backend])-1)]
+                if isinstance(action, Exception):
+                    raise action
+                return action(self) if callable(action) else action
+
+            def wait_for_timeout(self, milliseconds):
+                events.append(('wait', milliseconds))
+
+            def close(self):
+                events.append(('close',))
+
+        self.page = Page()
+
+        def new_page(browser, dpr):
+            self.assertIs(browser, self.namespace['browser'])
+            events.append(('page', dpr))
+            if creation_error:
+                raise creation_error
+            return self.page
+
+        self.namespace['new_page'] = new_page
+        return self.namespace['translucent_paint']()
+
+    def report(self, backend):
+        return json.loads((self.output / f'translucent-capture-{backend}-reference.json').read_text())
+
+    def captures(self, backend):
+        return [event for event in self.events if event[:2] == ('capture', backend)]
+
+    def assert_legacy_absent(self):
+        for backend in ('html', 'webgpu'):
+            self.assertFalse((self.output / f'translucent-{backend}.png').exists())
+
+    def test_both_captures_keep_one_page_and_fixed_baseline(self):
+        self.assertEqual(self.run_case(), {'changedPixels': 0})
+        self.assertEqual([event for event in self.events if event[0] in ('page', 'fixture', 'switch')],
+                         [('page', 1.5), ('fixture',), ('switch', 'webgpu')])
+        for backend in ('html', 'webgpu'):
+            self.assertEqual(self.captures(backend), [('capture', backend, {'caret': 'initial'})] * 3)
+            self.assertTrue(self.report(backend)['accepted'])
+            self.assertEqual((self.output / f'translucent-{backend}.png').read_bytes(), b'baseline')
+
+    def test_each_single_command_timeout_requires_three_fresh_images(self):
+        images = [b'old', b'old', ScreenshotTimeout('capture stalled'), b'baseline']
+        self.assertEqual(self.run_case({'html': images, 'webgpu': images}), {'changedPixels': 0})
+        for backend in ('html', 'webgpu'):
+            self.assertEqual(len(self.captures(backend)), 6)
+            report = self.report(backend)
+            self.assertTrue(report['accepted'])
+            self.assertEqual(report['stableCaptures'], 3)
+            self.assertEqual(report['captureErrors'], [{'attempt': 2, 'error': 'capture stalled'}])
+            self.assertIsNone(report['samples'][2]['difference'])
+        self.assertEqual(sum(event[0] == 'switch' for event in self.events), 1)
+
+    def test_repeated_command_timeout_fails_on_either_side(self):
+        for backend in ('html', 'webgpu'):
+            with self.subTest(backend=backend):
+                with self.assertRaisesRegex(ScreenshotTimeout, 'second'):
+                    self.run_case({backend: [ScreenshotTimeout('first'), b'baseline', ScreenshotTimeout('second')]})
+                self.assertEqual(len(self.captures(backend)), 3)
+                report = self.report(backend)
+                self.assertFalse(report['accepted'])
+                self.assertEqual(len(report['captureErrors']), 2)
+                self.assert_legacy_absent()
+
+    def test_backend_change_during_capture_is_fatal(self):
+        def fall_back(page):
+            page.backend = 'canvas2d'
+            return b'baseline'
+
+        with self.assertRaisesRegex(AssertionError, 'unexpected renderer'):
+            self.run_case({'webgpu': [fall_back]})
+        self.assertEqual(len(self.captures('webgpu')), 1)
+        self.assertFalse(self.report('webgpu')['accepted'])
+        self.assert_legacy_absent()
+
+    def test_stable_wrong_pixels_fail_against_the_unchanged_baseline(self):
+        with self.assertRaisesRegex(AssertionError, 'CSS opacity applied twice'):
+            self.run_case({'webgpu': [b'stable wrong pixels']})
+        self.assertEqual(len(self.captures('html')), 3)
+        self.assertEqual(len(self.captures('webgpu')), 3)
+        self.assertEqual((self.output / 'translucent-html.png').read_bytes(), b'baseline')
+        self.assertEqual((self.output / 'translucent-webgpu.png').read_bytes(), b'stable wrong pixels')
+
+    def test_failed_rerun_retires_legacy_and_unvisited_capture_evidence(self):
+        self.run_case()
+        for backend in ('html', 'webgpu'):
+            self.assertTrue((self.output / f'translucent-{backend}.png').exists())
+        with self.assertRaisesRegex(RuntimeError, 'page closed'):
+            self.run_case(creation_error=RuntimeError('page closed'))
+        self.assert_legacy_absent()
+        self.assertFalse(list(self.output.glob('translucent-capture-*')))
+
+
 if __name__ == '__main__':
     unittest.main()

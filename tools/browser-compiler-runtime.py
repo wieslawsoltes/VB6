@@ -31,9 +31,10 @@ def boot():
     page = context.new_page(); page.set_default_timeout(10000)
     page._errors=[]
     page.on('pageerror', lambda e: page._errors.append(str(e)))
-    if OPTIONS.http: page.goto(URL + '/dist/VB6-Studio-Web.html')
-    else: page.set_content(HTML)
-    page.wait_for_function('!!globalThis.vb6Studio?.syntaxDiagnostics')
+    # Bound complete IDE startup separately from the 10-second feature actions.
+    if OPTIONS.http: page.goto(URL + '/dist/VB6-Studio-Web.html', wait_until='commit', timeout=60000)
+    else: page.set_content(HTML, wait_until='domcontentloaded', timeout=60000)
+    page.wait_for_function('!!globalThis.vb6Studio?.syntaxDiagnostics', timeout=60000)
     return page
 
 def source(p, code, extra=None):

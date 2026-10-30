@@ -8,7 +8,7 @@ import hashlib, json, os, subprocess, threading
 from functools import partial
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 ROOT=Path(__file__).resolve().parents[1]
 REPORT=ROOT/'reports/win32-exports'
 REPORT.mkdir(parents=True,exist_ok=True)
@@ -49,6 +49,47 @@ def exercise(page,sample):
             check(all(value in output for value in sample['expected']),f'{sample["id"]}: {output}')
             check(stats(page)==before,f'{sample["id"]} retained transient resources')
         detail={'output':output,'runs':2,'resources':before}
+    elif sample['id']=='macos26-preferences':
+        layout=page.get_by_role('radiogroup',name='Layout density',exact=True)
+        status=page.locator('[data-control="Status"]')
+        layout.get_by_role('radio',name='Spacious',exact=True).click()
+        expect(status).to_have_text('Layout: Spacious')
+        preview=page.locator('[data-control="Options"] [data-toolbar-index="2"]')
+        preview.click();expect(preview).to_have_attribute('aria-pressed','true')
+        expect(status).to_have_text('Preview: shown')
+        preview.click();expect(preview).to_have_attribute('aria-pressed','false')
+        page.locator('[data-control="Actions"] [data-toolbar-index="0"]').click()
+        expect(status).to_have_text('Refresh complete')
+        check(page.evaluate("vb6Application.forms[0].controlMap.get('actions').Buttons.items.every(button=>button.Value===0)"),'Momentary action retained a selection')
+        search=page.locator('[data-control="Search"] input')
+        search.fill('Workspace');expect(status).to_have_text('Search: Workspace')
+        notifications=page.get_by_role('switch',name='Enable notifications',exact=True)
+        notifications.click();expect(notifications).not_to_be_checked()
+        expect(status).to_have_text('Notifications: disabled')
+        pages=page.locator('[data-control="Pages"]')
+        pages.get_by_role('tab',name='Notes',exact=True).click()
+        notes=page.locator('[data-control="Notes"] textarea')
+        notes.fill('Keep these notes\nAcross page changes')
+        pages.get_by_role('tab',name='General',exact=True).click()
+        expect(notes).to_be_hidden()
+        pages.get_by_role('tab',name='Notes',exact=True).click()
+        expect(notes).to_have_value('Keep these notes\nAcross page changes')
+        page.locator('[data-control="Actions"] [data-toolbar-index="1"]').click()
+        expect(status).to_have_text('Reset complete')
+        expect(layout.get_by_role('radio',name='Comfortable',exact=True)).to_be_checked()
+        expect(notes).to_have_value('')
+        pages.get_by_role('tab',name='General',exact=True).click()
+        expect(search).to_have_value('')
+        expect(notifications).to_be_checked()
+        page.locator('[data-control="Actions"] [data-toolbar-index="1"]').click()
+        idle(page);expect(status).to_have_text('Reset complete')
+        search.fill('After reset');expect(status).to_have_text('Search: After reset')
+        notifications.click();expect(status).to_have_text('Notifications: disabled')
+        notifications.click();expect(status).to_have_text('Notifications: enabled')
+        page.locator('[data-control="Apply"]').click()
+        expect(status).to_have_text('Applied: Comfortable')
+        idle(page)
+        detail={'segmentedModes':3,'retainedTabEditor':True,'vbCollectionEvents':True,'resetAndApply':True}
     elif sample['id']=='win32':
         for control,text in [('cmdDraw','GDI drawing'),('cmdBitmap','Writable DIB'),('cmdRegions','Complex region:'),('cmdAdvanced','Affine path clip')]:
             page.locator(f'[data-control="{control}"]').click();idle(page)
@@ -78,13 +119,18 @@ try:
         for sample in catalog:
             project=json.loads((ROOT/f'examples/{sample["id"]}.vb6web').read_text())
             ide.evaluate('project=>vb6Studio.loadProject(project)',project)
-            expected=ide.evaluate('vb6Studio.project')
+            authored=ide.evaluate('vb6Studio.project')
+            expected=json.loads(json.dumps(authored))
+            # Deployment consumes validated forms; only the design-time XAML
+            # sidecar is omitted. Every other authored field must stay exact.
+            for module in expected['modules']: module.pop('xaml',None)
             with ide.expect_download() as event:
                 ide.locator('[data-command="exportHTML"]').first.click()
             download=event.value
             check(download.failure() is None,'IDE download failed')
             file=REPORT/(sample['id']+'.html');download.save_as(file)
             data=file.read_bytes();text=data.decode('utf-8')
+            check(ide.evaluate('vb6Studio.project')==authored,'IDE export changed the authored project')
             check(text.startswith('<!doctype html>'),'Missing standalone document')
             check('VB6Runtime.mountApplication' in text,'Missing embedded runtime')
             origins=['inline'] if INLINE else ['http','file']
@@ -103,7 +149,7 @@ try:
                     check(not app_errors,str(app_errors))
                     check(not [r for r in requests if r.startswith(('http:','https:')) and r!=url], 'Export startup loaded external network resources: '+str(requests))
                     results.append({'case':origin+'-download-'+sample['id'],'passed':True,'sha256':hashlib.sha256(data).hexdigest(),**detail})
-                    if sample['id'].startswith('win32-') and origin==origins[0]: app.screenshot(path=str(REPORT/(sample['id']+'.png')))
+                    if (sample['id'].startswith('win32-') or sample['id']=='macos26-preferences') and origin==origins[0]: app.screenshot(path=str(REPORT/(sample['id']+'.png')))
                     app.evaluate('()=>vb6Application.dispose()')
                 finally: app_context.close()
         check(not errors,str(errors));browser.close()

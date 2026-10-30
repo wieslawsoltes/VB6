@@ -25,7 +25,7 @@ class WorkflowAuditTests(unittest.TestCase):
     def test_complete_graph_passes(self):
         result=check.audit(self.root)
         self.assertEqual(result['preservedEntrypoints'],89)
-        self.assertEqual(result['linuxNodeTests'],['linux-aot-native.test.mjs','linux-aot.test.mjs','linux-package.test.mjs'])
+        self.assertEqual(result['linuxNodeTests'],sorted(p.name for p in (self.root/'tests').glob('linux-*.test.mjs')))
     def test_node_native_runtime_platform_required(self):
         self.reject(lambda w:w['jobs']['node'].update({'runs-on':'ubuntu-latest'}))
     def test_node_native_runtime_dependency_required(self):
@@ -68,7 +68,39 @@ class WorkflowAuditTests(unittest.TestCase):
     def test_linux_runtime_rebuild_required(self):
         self.reject(lambda w:[s.update({'run':'npm run test:linux'}) for s in w['jobs']['linux']['steps'] if '--rebuild' in s.get('run','')])
     def test_linux_shipped_runtime_execution_required(self):
-        self.reject(lambda w:[s.update({'run':'npm run test:linux'}) for s in w['jobs']['linux']['steps'] if s.get('run')=='node tools/test-linux-aot.mjs'])
+        self.reject(lambda w:[s.update({'run':'npm run test:linux'}) for s in w['jobs']['linux']['steps'] if 'tools/test-linux-aot.mjs' in s.get('run','') and '--rebuild' not in s.get('run','')])
+    def test_linux_gtk4_runtime_rebuild_required(self):
+        self.reject(lambda w:[s.update({'run':'npm run test:linux'}) for s in w['jobs']['linux']['steps'] if '--toolkit gtk4 --rebuild' in s.get('run','')])
+    def test_linux_gtk4_shipped_runtime_required(self):
+        self.reject(lambda w:[s.update({'run':'npm run test:linux'}) for s in w['jobs']['linux']['steps'] if '--toolkit gtk4 --report reports/linux-aot/' in s.get('run','')])
+    def test_linux_gtk4_development_dependency_required(self):
+        self.reject(lambda w:[s.update({'run':s['run'].replace('libgtk-4-dev','')}) for s in w['jobs']['linux']['steps'] if 'libgtk-4-dev' in s.get('run','')])
+    def test_linux_native_distribution_requires_both_toolkits(self):
+        self.reject(lambda w:w['jobs']['linux-native-distribution']['strategy']['matrix']['toolkit'].remove('gtk4'))
+    def test_linux_native_distribution_requires_arm64(self):
+        self.reject(lambda w:w['jobs']['linux-native-distribution']['strategy']['matrix']['architecture'].remove('arm64'))
+    def test_linux_native_distribution_cannot_be_skipped(self):
+        self.reject(lambda w:[s.update({'if':'false'}) for s in w['jobs']['linux-native-distribution']['steps'] if 'tools/test-linux-native-distribution.mjs' in s.get('run','')])
+    def test_linux_native_distribution_must_execute(self):
+        self.reject(lambda w:[s.update({'run':s['run']+' --execute off'}) for s in w['jobs']['linux-native-distribution']['steps'] if 'tools/test-linux-native-distribution.mjs' in s.get('run','')])
+    def test_linux_flatpak_declared_runtime_required(self):
+        self.reject(lambda w:[s.update({'run':s['run'].replace('org.gnome.Platform//50','org.gnome.Platform//49')}) for s in w['jobs']['linux-native-distribution']['steps'] if 'org.gnome.Platform//50' in s.get('run','')])
+    def test_linux_flatpak_session_daemon_must_inherit_installation(self):
+        self.reject(lambda w:[s.pop('env') for s in w['jobs']['linux-native-distribution']['steps'] if 'tools/test-linux-native-distribution.mjs' in s.get('run','')])
+    def test_linux_flatpak_portal_cannot_use_another_installation(self):
+        self.reject(lambda w:[s['env'].update({'FLATPAK_USER_DIR':'${{ runner.temp }}/other-flatpak'}) for s in w['jobs']['linux-native-distribution']['steps'] if 'tools/test-linux-native-distribution.mjs' in s.get('run','')])
+    def test_linux_iso_data_probe_requires_private_mount_setup_on_hosted_runner(self):
+        self.reject(lambda w:[s.update({'run':s['run'].replace(' --iso-mount-namespace privileged','')}) for s in w['jobs']['linux-native-distribution']['steps'] if 'tools/test-linux-native-distribution.mjs' in s.get('run','')])
+    def test_linux_arm64_execution_cannot_be_removed(self):
+        self.reject(lambda w:w['jobs']['linux']['strategy']['matrix']['architecture'].remove('arm64'))
+    def test_linux_browser_arm64_execution_cannot_be_removed(self):
+        self.reject(lambda w:w['jobs']['linux-browser-native']['strategy']['matrix']['architecture'].remove('arm64'))
+    def test_linux_package_execution_required(self):
+        self.reject(lambda w:[s.update({'run':'npm run test:linux'}) for s in w['jobs']['linux']['steps'] if 'tools/test-linux-distribution.mjs' in s.get('run','')])
+    def test_linux_browser_architecture_must_reach_execution(self):
+        self.reject(lambda w:[s.update({'run':'node tools/test-linux-browser-artifacts.mjs browser-linux-input'}) for s in w['jobs']['linux-browser-native']['steps'] if 'tools/test-linux-browser-artifacts.mjs' in s.get('run','')])
+    def test_linux_printer_dependency_required(self):
+        self.reject(lambda w:[s.update({'run':s['run'].replace('libcups2-dev','')}) for s in w['jobs']['linux']['steps'] if 'libcups2-dev' in s.get('run','')])
     def test_linux_runtime_tool_owns_its_gui_display(self):
         self.reject(lambda w:[s.update({'run':'xvfb-run -a '+s['run']}) for s in w['jobs']['linux']['steps'] if 'tools/test-linux-aot.mjs' in s.get('run','')])
     def test_linux_browser_native_requires_artifacts(self):

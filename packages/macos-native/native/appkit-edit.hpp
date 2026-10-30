@@ -11,6 +11,7 @@ Text nativeEditText(MacControl&);
 NSRange nativeEditSelection(MacControl&);
 void nativeEditSelect(MacControl&, NSRange);
 void nativeEditCapture(MacControl&, NSText* editor = nil);
+bool nativeEditValidate(MacControl&, NSText* editor = nil);
 void nativeEditSetText(MacControl&, const Text&);
 void nativeEditSetSelection(MacControl&, const std::string&, Value);
 void nativeEditChanged(MacControl&);
