@@ -54,6 +54,34 @@ including symlinks; there is no destructive overwrite switch. Parent directories
 must exist. An I/O failure can leave incomplete newly-created output, which must
 be reviewed before reuse; preflight errors create no output.
 
+## Application desktop and private files
+
+Standalone HTML and deployment archives include a desktop bar. After the last
+form closes, **Launch application** starts it again without reloading the page.
+The previous runtime is disposed before the new instance starts; private files
+and application settings carry over in memory, including when browser storage is
+denied or `persist: false` is selected. A hidden or minimized form still belongs
+to a running application and does not enable a second instance.
+
+**Private disk** opens the application's folders and files even after its forms
+have closed. Use **Download** to copy a file to the operating system, or
+**Download all (.zip)** to preserve the complete folder hierarchy, including
+empty folders. Downloads preserve binary bytes and the Windows-1252 encoding of
+VB text files. For example, Northwind's saved order is under `Orders`.
+
+The private disk remains isolated from the operating system. Downloads require
+an explicit button click; they do not grant the application access to other local
+files. Download a copy before closing the browser page when persistent storage
+is unavailable. Browser storage is scoped to the application's project identity
+and browser origin; a downloaded copy is the durable backup.
+
+Embedder integrations can set the runtime option `desktop: false` to omit the
+bar. Authenticated IDE runtime frames omit it automatically, since their lifetime
+belongs to the IDE. The exported `vb6RestartApplication()` function returns the
+new host when the application has closed, or the existing host while it is still
+running. Concurrent restart calls share one pending launch. Each completed
+relaunch replaces `vb6ApplicationReady` and emits the usual `vb6:ready` event.
+
 ## Public APIs
 
 ```js

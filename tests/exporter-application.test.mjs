@@ -8,6 +8,7 @@ import {THEMES} from '../src/theme/theme.js';
 import {exportApplication, exportApplicationFiles, inspectApplicationExport, createApplicationExporter, RUNTIME_VERSION} from '../src/exporter/exporter.js';
 import {APPLICATION_BOOTSTRAP} from '../src/exporter/bootstrap.js';
 import {APPLICATION_SHELL_CSS} from '../src/exporter/document.js';
+import {VirtualFileSystem} from '../src/runtime/filesystem.js';
 
 const embedded = (html, id) => JSON.parse(new RegExp(`<script id="${id}" type="application/json">([\\s\\S]*?)<\\/script>`).exec(html)[1]);
 for (const example of EXAMPLES) test('split deployment preserves complete ' + example.id, () => {
@@ -206,5 +207,103 @@ test('invalid mount results report a startup error rather than exposing a fake r
     const env = environment({mountApplication: async () => host});
     await assert.rejects(env.start(), /did not return a host/);
     assert.ok(!env.events.some(e => e.type === 'vb6:ready'));
+  }
+});
+
+test('relaunch replaces one host and preserves memory-only files/settings without reconfiguring adapters', async () => {
+  let mounts=0,disposed=0,configured=0,received;
+  const disk=new VirtualFileSystem();disk.writeBytes('/kept.bin',[0,255,129]);
+  const first={vm:{state:'stopped'},fs:disk,settings:{counter:7},persist(){throw Error('storage denied');},dispose(){disposed++;this.disposed=true;}};
+  const next={vm:{state:'idle'},fs:disk,settings:{counter:7}};
+  const env=environment({canRelaunchApplication:()=>true,mountApplication:async(p,c,o)=>{mounts++;received=o;return mounts===1?first:next;}});
+  env.context.vb6ConfigureApplication=()=>{configured++;return {};};
+  await env.start();
+  const a=env.context.vb6RestartApplication(),b=env.context.vb6RestartApplication();
+  assert.equal(a,b);assert.equal(await a,next);assert.equal(mounts,2);assert.equal(disposed,1);assert.equal(configured,1);
+  assert.deepEqual(received.sessionState.vfs,disk.snapshot());assert.deepEqual(received.sessionState.settings,{counter:7});
+  assert.equal(env.context.vb6Application,next);assert.equal(env.context.vb6ApplicationReady,a);
+  assert.equal(env.context.vb6ApplicationStatus.phase,'ready');
+});
+
+test('launching an application that still owns live forms never creates a second VM', async () => {
+  let mounts=0,disposed=0;const host={vm:{state:'idle'},dispose(){disposed++;}};
+  const env=environment({canRelaunchApplication:()=>false,mountApplication:async()=>{mounts++;return host;}});
+  await env.start();assert.equal(await env.context.vb6RestartApplication(),host);assert.equal(mounts,1);assert.equal(disposed,0);
+});
+
+test('a failed relaunch retains memory-only files and settings for the next attempt', async () => {
+  const disk=new VirtualFileSystem();disk.makeDirectory('/Exports');disk.makeDirectory('/Exports/Empty');
+  disk.writeBytes('/Exports/kept.bin',[0,255,129]);
+  let mounts=0,disposals=0;
+  const first={vm:{state:'stopped'},fs:disk,settings:{counter:7},dispose(){disposals++;this.disposed=true;}};
+  const env=environment({canRelaunchApplication:()=>true,mountApplication:async(_project,_container,options)=>{
+    mounts++;
+    if(mounts===1)return first;
+    if(mounts===2)throw new Error('Temporary mount failure');
+    return {vm:{state:'idle'},fs:new VirtualFileSystem(options.sessionState?.vfs),settings:structuredClone(options.sessionState?.settings||{})};
+  }});
+  await env.start();
+  await assert.rejects(env.context.vb6RestartApplication(),/Temporary mount failure/);
+  assert.equal(env.context.vb6ApplicationStatus.phase,'error');
+  assert.equal(env.context.vb6Application,first,'the closed host keeps the private disk accessible after a failed launch');
+  const next=await env.context.vb6RestartApplication();
+  assert.deepEqual(next.fs.readBytes('/Exports/kept.bin'),new Uint8Array([0,255,129]));
+  assert.ok(next.fs.directories.has('/Exports/Empty'));
+  assert.deepEqual(next.settings,{counter:7});
+  assert.equal(disposals,1);assert.equal(mounts,3);
+  assert.equal(env.context.vb6ApplicationStatus.phase,'ready');
+});
+
+test('departure during relaunch disposes the late host without disposing the closed host again', async () => {
+  let mounts=0,finish,firstDisposals=0,lateDisposals=0;
+  const first={vm:{state:'stopped'},fs:new VirtualFileSystem(),settings:{},dispose(){firstDisposals++;this.disposed=true;}};
+  const env=environment({canRelaunchApplication:()=>true,mountApplication:()=>{
+    if(++mounts===1)return Promise.resolve(first);
+    return new Promise(resolve=>{finish=resolve;});
+  }});
+  await env.start();
+  const relaunch=env.context.vb6RestartApplication();
+  await new Promise(resolve=>setImmediate(resolve));
+  env.context.dispatchEvent({type:'pagehide',persisted:false});
+  await assert.rejects(relaunch,{name:'AbortError'});
+  finish({dispose(){lateDisposals++;this.disposed=true;}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(firstDisposals,1);assert.equal(lateDisposals,1);
+  assert.equal(env.context.vb6ApplicationStatus.phase,'disposed');
+  assert.equal(env.events.filter(event=>event.type==='vb6:ready').length,1);
+});
+
+for (const persist of [false, true]) test(`a failed relaunch retains private bytes and settings for retry (persist=${persist})`, async () => {
+  const disk=new VirtualFileSystem();disk.writeBytes('/important.bin',[0,255,129]);
+  const attempts=[];let disposed=0;
+  const first={vm:{state:'stopped'},fs:disk,settings:{counter:7},
+    persist(){throw Error('storage denied');},dispose(){disposed++;this.disposed=true;}};
+  const next={vm:{state:'running'},fs:disk,settings:{counter:7}};
+  const env=environment({canRelaunchApplication:()=>true,mountApplication:async(p,c,o)=>{
+    attempts.push(o);
+    if(attempts.length===1)return first;
+    if(attempts.length===2)throw Error('temporary startup failure');
+    return next;
+  }});
+  env.nodes['vb6-options'].textContent=JSON.stringify({persist});
+  await env.start();
+  await assert.rejects(env.context.vb6RestartApplication(),/temporary startup failure/);
+  assert.equal(env.context.vb6ApplicationStatus.phase,'error');
+  assert.equal(await env.context.vb6RestartApplication(),next);
+  assert.equal(disposed,1);assert.equal(attempts.length,3);
+  for(const attempt of attempts.slice(1)) {
+    assert.deepEqual(attempt.sessionState.vfs,disk.snapshot());
+    assert.deepEqual(attempt.sessionState.settings,{counter:7});
+  }
+  assert.equal(env.events.filter(event=>event.type==='vb6:ready').length,2);
+  assert.equal(env.context.vb6ApplicationStatus.phase,'ready');
+});
+
+test('the export desktop is opt-out and never injected into the authenticated IDE debug frame', async () => {
+  for(const options of [{desktop:false},{bridgeToken:'ide-token'}]) {
+    let desktops=0;
+    const env=environment({mountApplication:async()=>({}),createApplicationDesktop(){desktops++;return {bind(){},setLoading(){}};}});
+    env.nodes['vb6-options'].textContent=JSON.stringify(options);
+    await env.start();assert.equal(desktops,0);
   }
 });

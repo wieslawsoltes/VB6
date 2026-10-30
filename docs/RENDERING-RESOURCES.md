@@ -1,7 +1,7 @@
 # Rendering resource and fidelity contracts
 
 This documents the reusable `src/rendering` layer. The default remains WebGPU
-with configured WebGL2, Canvas2D and HTML fallbacks, and native browser text.
+with WebGL2 and HTML fallbacks, and native browser text. Canvas2D remains an explicit backend/fallback choice.
 The DOM remains the layout, input, focus, selection, IME and accessibility
 source of truth. No DOM screenshot, font download or raster readback is used
 by normal frame submission.

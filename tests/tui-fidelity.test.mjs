@@ -9,13 +9,27 @@ import {desktopPattern} from '../src/tui/texture.js';
 import {bindControlPaintProperties,readControlPaintProperties} from '../src/rendering/invalidation.js';
 
 for(const profile of Object.keys(TUI_APPEARANCE))test(`${profile}: interactive semantic roles always retain foreground contrast`,()=>{
-  for(const role of ['panel','title','menu','selected','field','button','focusedButton','disabled','editor','status']){
+  for(const role of ['panel','title','menu','selected','field','button','focusedButton','disabled','editor','search','status']){
     const a=tuiAttribute(profile,role);assert.notEqual(a.foreground,a.background,role);
     for(const value of Object.values(a))assert.ok(Number.isInteger(value)&&value>=0&&value<16);
     assert.ok(Object.isFrozen(a));
   }
   assert.match(desktopPattern(profile),/^url\("data:image\/svg\+xml,/);
   assert.equal(desktopPattern(profile),desktopPattern(profile));
+});
+
+for(const profile of Object.keys(TUI_APPEARANCE))test(`${profile}: native source search recolors glyphs without obscuring selections`,()=>{
+  const buffer=new CellBuffer(8,1),match=tuiAttribute(profile,'search'),selected=tuiAttribute(profile,'selected');
+  const state={source:true,items:[{x:0,y:0,width:8,height:1,text:'abc defg',kind:'text'},
+    {x:1,y:0,width:1,height:1,text:'b',kind:'text',selected:true}],search:[{x:-1,y:0,width:5,height:1}]};
+  paintChrome(buffer,state,profile);
+  assert.equal(buffer.toText(),'abc defg');
+  assert.equal(buffer.colors[0],match.foreground|(match.background<<4));
+  assert.equal(buffer.colors[1],selected.foreground|(selected.background<<4));
+  assert.equal(buffer.colors[2],match.foreground|(match.background<<4));
+  paintChrome(buffer,{...state,search:[]},profile);
+  assert.equal(buffer.colors[0]>>4,tuiAttribute(profile,'editor').background);
+  assert.equal(buffer.toText(),'abc defg');
 });
 
 test('semantic defaults and label sizing do not expose inherited keys or split Unicode scalars',()=>{

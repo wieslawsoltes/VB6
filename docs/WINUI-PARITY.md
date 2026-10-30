@@ -3,7 +3,8 @@
 `fluent` and `fluent-dark` share the same WinUI resource vocabulary in the IDE,
 application designer, application runtime, Options preview, detached browser
 windows, dialogs, portals and standalone HTML exports. IDE and application
-appearance are still independent. Classic remains the default.
+appearance are still independent. Windows Standard (2000) is the initial theme;
+explicit saved themes remain unchanged.
 
 The [WinUI XAML compatibility guide](WINUI-XAML-COMPATIBILITY.md) documents
 imported forms, live typed resources, supported styles/controls, source editing

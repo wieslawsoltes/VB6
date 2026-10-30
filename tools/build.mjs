@@ -3,6 +3,7 @@ import {buildIntelligentUI} from './build-intelligent-ui.mjs';
 import './build-vbnet-migration.mjs';
 import {buildMacOSPackage} from './build-macos-native.mjs';
 import {buildLinuxPackage} from './build-linux-native.mjs';
+import {buildPascalPackage} from './build-pascal.mjs';
 import {recordIdeArtifacts,verifyIdeArtifacts} from './ide-artifacts.mjs';
 import {formStamp} from '../src/xaml/contract.js';
 import './theme-css.mjs';
@@ -14,6 +15,7 @@ import fs from 'node:fs';import path from 'node:path';import {bundle} from './bu
 const root=path.resolve(import.meta.dirname,'..');process.chdir(root);fs.mkdirSync('dist',{recursive:true});
 buildMacOSPackage(root);
 buildLinuxPackage(root);
+buildPascalPackage(root);
 buildIntelligentUI(root);
 const layout=bundle(path.resolve('packages/auto-layout/src/index.js'),'VB6AutoLayout');fs.mkdirSync('packages/auto-layout/dist',{recursive:true});fs.writeFileSync('packages/auto-layout/dist/auto-layout.js',layout);fs.writeFileSync('dist/auto-layout.js',layout);
 const win32=bundle(path.resolve('packages/win32-browser/src/index.js'),'Win32Compat');fs.mkdirSync('packages/win32-browser/dist',{recursive:true});fs.writeFileSync('packages/win32-browser/dist/win32-browser.js',win32);fs.writeFileSync('dist/win32-browser.js',win32);
@@ -36,7 +38,7 @@ function stableExampleIds(project,prefix){
   return project;
 }
 for(const example of EXAMPLES){const p=stableExampleIds(example.create(),example.id);fs.writeFileSync(`examples/${example.id}.vb6web`,JSON.stringify(p,null,2));fs.writeFileSync(`dist/examples/${example.id}.html`,exportApplication(p));}
-if(fs.existsSync('src/ide/main.js')){const ide=bundle(path.resolve('src/mcp/studio-entry.js'),'VB6Studio'),ideCSS=baseCSS+'\n'+fs.readFileSync('src/ide/ide.css','utf8')+'\n'+['src/designer/designer.css','src/editor/xaml-editor.css','src/editor/editor-advanced.css','src/ide/docking.css','src/ide/auto-layout.css','src/ide/command-bars.css','src/ide/debug-windows.css','src/ide/ide-tools.css','src/ide/data-environment.css','src/ide/browser-windows.css','src/mcp/mcp.css','src/agents/agents.css','packages/intelligent-ui/src/styles.css','src/intelligent-ui/studio.css'].filter(p=>fs.existsSync(p)).map(p=>fs.readFileSync(p,'utf8')).join('\n')+'\n'+bevelCSS+'\n'+applicationCSS+'\n'+fs.readFileSync('src/theme/ide-palettes.css','utf8')+'\n'+fs.readFileSync('src/theme/ide-themes.css','utf8')+'\n'+fs.readFileSync('src/theme/winui-ide.css','utf8')+'\n'+fs.readFileSync('src/theme/macos26-ide.css','utf8')+'\n'+detailCSS+'\n'+fs.readFileSync('src/ide/figma-mode.css','utf8')+'\n'+fs.readFileSync('src/ide/figma/services.css','utf8');const template=fs.readFileSync('src/ide/index.html','utf8');fs.writeFileSync('dist/studio.js',ide);fs.writeFileSync('dist/studio.css',ideCSS);fs.writeFileSync('dist/index.html',template.replace('<!--STYLE-->','<link rel="stylesheet" href="studio.css">').replace('<!--SCRIPT-->','<script src="studio.js"></script>'));const standalone=template.replace('<!--STYLE-->',()=>'<style>'+ideCSS+'</style>').replace('<!--SCRIPT-->',()=>'<script>'+ide.replace(/<\/script/gi,'<\\/script')+'</script>');fs.writeFileSync('dist/VB6-Studio-Web.html',standalone);}
+if(fs.existsSync('src/ide/main.js')){const ide=bundle(path.resolve('src/mcp/studio-entry.js'),'VB6Studio'),ideCSS=baseCSS+'\n'+fs.readFileSync('src/ide/ide.css','utf8')+'\n'+['src/designer/designer.css','src/editor/xaml-editor.css','src/editor/editor-advanced.css','src/ide/docking.css','src/ide/auto-layout.css','src/ide/command-bars.css','src/ide/debug-windows.css','src/ide/ide-tools.css','src/ide/input-modes.css','src/ide/data-environment.css','src/ide/browser-windows.css','src/mcp/mcp.css','src/agents/agents.css','packages/intelligent-ui/src/styles.css','src/intelligent-ui/studio.css'].filter(p=>fs.existsSync(p)).map(p=>fs.readFileSync(p,'utf8')).join('\n')+'\n'+bevelCSS+'\n'+applicationCSS+'\n'+fs.readFileSync('src/theme/ide-palettes.css','utf8')+'\n'+fs.readFileSync('src/theme/ide-themes.css','utf8')+'\n'+fs.readFileSync('src/theme/winui-ide.css','utf8')+'\n'+fs.readFileSync('src/theme/macos26-ide.css','utf8')+'\n'+detailCSS+'\n'+fs.readFileSync('src/ide/figma-mode.css','utf8')+'\n'+fs.readFileSync('src/ide/figma/services.css','utf8');const template=fs.readFileSync('src/ide/index.html','utf8');fs.writeFileSync('dist/studio.js',ide);fs.writeFileSync('dist/studio.css',ideCSS);fs.writeFileSync('dist/index.html',template.replace('<!--STYLE-->','<link rel="stylesheet" href="studio.css">').replace('<!--SCRIPT-->','<script src="studio.js"></script>'));const standalone=template.replace('<!--STYLE-->',()=>'<style>'+ideCSS+'</style>').replace('<!--SCRIPT-->',()=>'<script>'+ide.replace(/<\/script/gi,'<\\/script')+'</script>');fs.writeFileSync('dist/VB6-Studio-Web.html',standalone);}
 const {buildOcxLab}=await import('./build-ocx-lab.mjs');buildOcxLab(root);
 if(process.argv.includes('--update-ide-manifest'))recordIdeArtifacts(root);
 verifyIdeArtifacts(root);

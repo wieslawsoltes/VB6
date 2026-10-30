@@ -29,6 +29,7 @@ class FigmaAdvancedEditor(base.AdvancedEditorAcceptance):
         self.done()
 
 def load_tests(loader,standard_tests,pattern):
-    return unittest.TestSuite([FigmaAdvancedEditor('test_figma_code_panel_preserves_real_monaco_editing')])
+    names=[name for name in FigmaAdvancedEditor.__dict__ if name.startswith('test_')]
+    return unittest.TestSuite(FigmaAdvancedEditor(name) for name in base.select_case_names(names,base.configured_shard('advanced-editor')))
 
 if __name__=='__main__':unittest.main(verbosity=2)

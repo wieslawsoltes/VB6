@@ -18,8 +18,14 @@ export function createRenderingOptions(ide) {
   const restore = el('button', {type: 'button'}, 'Restore Default Backends');
   restore.addEventListener('click', () => {
     backend.value = DEFAULT_RENDERING.backend;
-    fallbacks.forEach((select, i) => { select.value = DEFAULT_RENDERING.fallbacks[i]; });
+    fallbacks.forEach((select, i) => { select.value = DEFAULT_RENDERING.fallbacks.filter(name => name !== 'html')[i] || ''; });
+    updateAvailability();
   });
+  const updateAvailability = () => { for (const input of fallbacks) input.disabled = backend.value === 'html'; };
+  backend.addEventListener('change', updateAvailability);
+  const useHTML = el('button', {type: 'button'}, 'Use HTML / CSS');
+  useHTML.addEventListener('click', () => { backend.value = 'html'; updateAvailability(); });
+  updateAvailability();
   const status = createRenderingStatus(ide, names);
   const node = el('div', {},
     el('fieldset', {}, el('legend', {}, 'Rendering'),
@@ -28,8 +34,8 @@ export function createRenderingOptions(ide) {
         el('label', {}, 'Text:'), text),
       el('label', {class: 'option-check'}, snap, 'Snap graphics to device pixels'),
       el('label', {class: 'option-check'}, exported, 'Use these settings in exported applications'),
-      restore, el('p', {class: 'tool-note'}, 'Default backends are restored in this dialog only. Press OK to apply; Cancel keeps the saved order.')),
-    el('p', {class: 'tool-note'}, 'HTML / CSS is always the final safety fallback. GPU mode paints classic UI geometry; native inputs, code editing, SVG icons and unsupported effects remain browser-rendered. Text-atlas mode is experimental. No screenshot rasterization is used.'),
+      restore, useHTML, el('p', {class: 'tool-note'}, 'Default backends are restored in this dialog only. Press OK to apply; Cancel keeps the saved order.')),
+    el('p', {class: 'tool-note'}, 'Without usable GPU APIs the default goes directly to HTML / CSS. With browser graphics acceleration disabled, HTML / CSS avoids the additional canvas scene and repaint work. Use HTML / CSS stages that choice until OK; Canvas2D remains available when explicitly selected. GPU mode paints classic UI geometry; native inputs, code editing, SVG icons and unsupported effects remain browser-rendered. Text-atlas mode is experimental. No screenshot rasterization is used.'),
     status.node);
   const output = el('pre', {class:'tool-note', 'aria-live':'polite', style:'white-space:pre-wrap;max-height:150px;overflow:auto'}, 'Measure this browser and adapter without changing the project or renderer preference.');
   const measure = el('button', {type:'button'}, 'Measure Rendering');

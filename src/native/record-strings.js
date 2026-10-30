@@ -12,6 +12,7 @@ const at=(base,displacement=0)=>mem32({base,displacement}),local=v=>at('ebp',v.o
 const P='native:record:',label=(layout,kind)=>P+layout.id+':'+kind;
 export const nativeRecordStringMethods={
   initializeFixedString(variable){
+    if(variable.nativeArray)return this.initializeArrayStorage(variable);
     if(variable.nativeRecord)return this.initializeRecordStrings(variable);
     return nativeStorageMethods.initializeFixedString.call(this,variable);
   },
@@ -26,9 +27,9 @@ export const nativeRecordStringMethods={
     return nativeStorageMethods.stringBuiltin.call(this,node,name);
   },
   nativeRecordAwareCall(target,plan){
-    const previous=this.nativeRecordTransfers,transfers=[];
-    this.nativeRecordTransfers=target.proc?null:transfers;
-    try{this.nativeTypedCall(target,plan);}finally{this.nativeRecordTransfers=previous;}
+    const previous=this.nativeRecordTransfers,previousTarget=this.nativeRecordCallTarget,transfers=[];
+    this.nativeRecordTransfers=target.proc?null:transfers;this.nativeRecordCallTarget=target;
+    try{this.nativeTypedCall(target,plan);}finally{this.nativeRecordTransfers=previous;this.nativeRecordCallTarget=previousTarget;}
     if(transfers.length){this.x.push();for(const transfer of transfers)this.nativeRecordCopyBack(transfer);this.x.popOperand('eax');}
   },
   loadInlineRecordString(variable){
@@ -54,7 +55,7 @@ export const nativeRecordStringMethods={
   },
   nativeExternalRecordArgument(parameter,node){
     const variable=this.variable(node),layout=this.nativeRecordTransferLayout(parameter,node);
-    if(!variable?.nativeRecord||variable.recordFieldArray||variable.nativeRecord.id!==layout.id)
+    if(!variable?.nativeRecord||variable.recordFieldArray||variable.nativeArray&&!variable.elementOf||variable.nativeRecord.id!==layout.id)
       this.fail('ByRef native record argument requires the exact declared record type');
     const x=this.x,destination=this.arrayWorkspace(4,'record-copyback-address'),buffer=this.arrayWorkspace(Math.ceil(layout.ansiSize/4)*4,'record-ansi');
     // The destination is resolved before later argument expressions, including

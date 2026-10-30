@@ -31,7 +31,7 @@ export function loadAdvancedEditorAssets(document, baseUrl) {
       if(!view.VB6AdvancedEditorRuntime)await add('script','entry.js');
       if(!view.VB6AdvancedMonaco?.monaco||!view.VB6AdvancedEditorRuntime?.createAdvancedEditorRuntime)throw new Error('The optional editor package is incomplete.');
       view.addEventListener('pagehide',()=>{for(const value of urls.values())view.URL.revokeObjectURL(value);},{once:true});
-      return {monaco:view.VB6AdvancedMonaco.monaco,create:view.VB6AdvancedEditorRuntime.createAdvancedEditorRuntime,
+      return {monaco:view.VB6AdvancedMonaco.monaco,createVimLineLayout:view.VB6AdvancedMonaco.createVimLineLayout,create:view.VB6AdvancedEditorRuntime.createAdvancedEditorRuntime,
         worker:()=>new view.Worker(url('language.worker.js'),{name:'vb6-language-server'}),baseUrl:base.href};
     }catch(error){view.MonacoEnvironment=previousEnvironment;for(const node of nodes)node.remove();for(const value of urls.values())view.URL.revokeObjectURL(value);throw error;}
   })();

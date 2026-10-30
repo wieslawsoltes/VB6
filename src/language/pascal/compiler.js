@@ -1,0 +1,644 @@
+import {compileModule} from '../compiler-core.js';
+import {parseExpression as parseSharedExpression} from '../expression.js';
+import {parsePascalModule, PascalParser} from './parser.js';
+import {PascalError, tokenizePascal, PASCAL_KEYWORDS} from './lexer.js';
+import {PascalWorkspace, PASCAL_TYPES, isOrdinal, isString, isNumeric, isAggregate, numericType, sameType, assignmentCompatible, foreignType} from './semantics.js';
+import {builtinType} from '../type-catalog.js';
+import {pascalControlArrayIndex} from './form-bindings.js';
+import {foreignMemberSymbol, foreignAccess, foreignExpression, foreignCall, foreignAssignable, foreignAssignment} from './foreign-lowering.js';
+import {getPascalHelper, getPascalRuntimeSource} from './runtime-library.js';
+import {pascalPointerStorage, generatePascalPointerHeaps} from './pointer-lowering.js';
+import {PascalFileLowerer} from './file-lowering.js';
+import {objectScopedSymbol, objectWithSymbol, objectMemberSymbol, objectRoutineCall, objectReferenceCompatible, lowerObjectAssignment, lowerObjectValueParameter, lowerObjectInitializer, objectTypeSizeOf, objectTypeMetadata, emitObjectDispatchers, objectDispatcherMetadata, initializeObjectMethod, finalizeObjectMethod, objectFailStatement} from './object-lowering.js';
+
+export {parsePascalModule};
+export {tokenizePascal, PascalError, PASCAL_KEYWORDS};
+
+const key = value => String(value).toLowerCase();
+const identifier = name => `[${String(name).replaceAll(']', '')}]`;
+const quote = value => String(value).split(/(\r|\n)/).filter(part => part !== '').map(part => part === '\r' ? 'vbCr' : part === '\n' ? 'vbLf' : `"${part.replaceAll('"', '""')}"`).join(' & ') || '""';
+const number = value => Number.isInteger(value) && value >= -2147483648 && value <= 2147483647 ? `${value}&` : `${Number(value)}${Number.isInteger(value) ? '#' : ''}`;
+const bool = value => value ? 'True' : 'False';
+const baseType = type => type?.kind === 'subrange' ? baseType(type.base) : type;
+const isBoolean = type => baseType(type)?.kind === 'boolean';
+const isCharacter = type => baseType(type)?.kind === 'char';
+const numericLiteral = node => node?.kind === 'number' || node?.kind === 'group' && numericLiteral(node.expression);
+const INTRINSIC_TYPES = Object.freeze({ord: 'longint', chr: 'char', length: 'integer', copy: 'string', concat: 'string', pos: 'integer', upcase: 'char', round: 'longint', trunc: 'longint', frac: 'real', int: 'real', abs: 'real', sqr: 'real', sqrt: 'real', sin: 'real', cos: 'real', arctan: 'real', exp: 'real', ln: 'real', odd: 'boolean', random: 'real', paramcount: 'integer', paramstr: 'string', sizeof: 'integer', ioresult: 'integer', eof: 'boolean', eoln: 'boolean', filepos: 'longint', filesize: 'longint', readkey: 'char', keypressed: 'boolean', low: 'longint', high: 'longint'});
+const DIRECT_CALLS = Object.freeze({sqrt: 'Sqr', sin: 'Sin', cos: 'Cos', arctan: 'Atn', exp: 'Exp', ln: 'Log', int: 'Fix', length: 'Len'});
+
+class SourceWriter {
+  constructor() {this.lines = []; this.map = [];}
+  emit(text, node, internal = false) {
+    const loc = node?.loc || node || {line: 1, column: 1, endLine: 1, endColumn: 1};
+    for (const line of String(text).split('\n')) {this.lines.push(line); this.map.push({generatedLine: this.lines.length, line: loc.line || 1, column: loc.column || 1, endLine: loc.endLine || loc.line || 1, endColumn: loc.endColumn || loc.column || 1, internal});}
+  }
+  append(other) {for (let i = 0; i < other.lines.length; i++) {this.lines.push(other.lines[i]); this.map.push({...other.map[i], generatedLine: this.lines.length});}}
+  get source() {return this.lines.join('\n');}
+}
+
+export class PascalLowerer {
+  constructor(input, options = {}) {
+    this.ast = input?.kind === 'pascalModule' ? input : parsePascalModule(input, options);
+    this.input = input?.kind === 'pascalModule' ? {...options.input, name: options.input?.name || input.sourceName || input.name, code: input.source} : typeof input === 'string' ? {name: this.ast.name, code: input} : input;
+    this.options = options; this.workspace = options.workspace || new PascalWorkspace(options.project);
+    this.binder = this.workspace.add(this.input, this.ast); this.binder.ensure();
+    this.workspace.preparePointers();
+    this.writer = new SourceWriter(); this.helpers = new Set(); this.tempId = 0; this.labels = 0;
+    this.files = new PascalFileLowerer(this);
+    this.flags = {completeBoolean: false, rangeChecks: false, overflowChecks: false, ioChecks: true};
+    this.directiveFlags = [];
+    for (const directive of this.ast.directives) {
+      const parts = directive.value.slice(1).trim().split(/[\s,]+/);
+      for (const part of parts) {
+        const match = /^([BRQI])([+-])$/i.exec(part);
+        if (match) this.directiveFlags.push({start: directive.start, flag: {B: 'completeBoolean', R: 'rangeChecks', Q: 'overflowChecks', I: 'ioChecks'}[match[1].toUpperCase()], value: match[2] === '+'});
+        else if (/^(?:I|INCLUDE)$/i.test(part) && parts.length > 1) this.fail('Include directives require the referenced file to be expanded by the project loader', directive, 'TP_INCLUDE_NOT_FOUND');
+        else if (/^(?:IFDEF|IFNDEF|IFOPT|ELSE|ENDIF|DEFINE|UNDEF)$/i.test(part)) this.fail('Conditional compilation directives require project symbol preprocessing', directive, 'TP_UNSUPPORTED_DIRECTIVE');
+        else if (/^[DLY][+-]$/i.test(part)) { /* Debug information remains available to the shared debugger. */ }
+        else this.fail(`Compiler directive '${part}' is not supported by the shared Turbo Pascal backend`, directive, 'TP_UNSUPPORTED_DIRECTIVE');
+      }
+    }
+    this.initializer = null;
+  }
+  fail(message, node = this.ast, code = 'TP_SEMANTIC') {this.binder.fail(message, node, code);}
+  flag(name, node) {let value = this.flags[name]; for (const directive of this.directiveFlags) if (directive.start <= (node?.loc?.start ?? node?.start ?? Infinity) && directive.flag === name) value = directive.value; return value;}
+  helper(name) {const helper = getPascalHelper(name); if (!helper) this.fail(`Missing Pascal runtime helper '${name}'`); this.helpers.add(helper.id); return identifier(helper.name);}
+  callHelper(name, args) {return `${this.helper(name)}(${args.join(', ')})`;}
+  context(scope = this.binder.scope, procedure = null, writer = new SourceWriter()) {return {scope, procedure, writer, loops: [], withObjects: [], activeControls: new Set(), pure: false};}
+  emit(context, source, node, internal = false) {context.writer.emit(source, node, internal);}
+  temporary(context, type, node, prefix = 'temp') {if (context.pure) this.fail('This Pascal expression requires executable temporary storage', node, 'TP_DEBUG_EXPRESSION'); const name = `__Pascal_${prefix}_${this.tempId++}`; this.emit(context, `Dim ${identifier(name)} As ${this.storageType(type)}`, node, true); return identifier(name);}
+  storageType(type) {if (type?.kind === 'record') return type.owner === this.binder ? identifier(type.name) : `${identifier(type.owner.name)}.${identifier(type.name)}`; return type?.vb || 'Variant';}
+  declaration(name, type, parameter = false) {
+    if (type.kind === 'array') return `${identifier(name)}(${parameter ? '' : type.dimensions.map(d => `${number(d.low)} To ${number(d.high)}`).join(', ')}) As ${this.storageType(type.element)}`;
+    return `${identifier(name)} As ${this.storageType(type)}`;
+  }
+  literal(value, type) {if (type.kind === 'boolean') return bool(value); if (typeof value === 'string') return quote(value); return number(value);}
+  access(symbol, context) {
+    if (symbol.ioGlobal === 'fileMode') return this.files.mode;
+    if (symbol.builtIn && symbol.kind === 'constant') return this.literal(symbol.value, symbol.type);
+    const capture = context.procedure?.captures.find(value => value.symbol === symbol);
+    if (capture) return identifier(capture.name);
+    const own = identifier(symbol.vbName || symbol.name);
+    return symbol.owner && symbol.owner !== this.binder ? `${identifier(symbol.owner.name)}.${own}` : own;
+  }
+  resolve(node, context, required = true) {
+    if (node.kind !== 'identifier') return null;
+    for (let i = context.withObjects.length - 1; i >= 0; i--) {const object = context.withObjects[i], member = objectWithSymbol(this, object, node, context); if (member) return member; const field = object.type.fields?.get(key(node.name)); if (field) return {kind: 'withField', name: field.name, type: field.type, access: `${object.source}.${identifier(field.name)}`};}
+    const member = objectScopedSymbol(this, node, context); if (member) return member;
+    return context.scope.resolve(node.name, required, node);
+  }
+  memberSymbol(node, context) {
+    const objectMember = objectMemberSymbol(this, node, context); if (objectMember) return objectMember;
+    if (node.kind !== 'member') return null;
+    const binder = node.object.kind === 'identifier' ? this.workspace.get(node.object.name) : null;
+    if (!binder) return foreignMemberSymbol(this, node, context);
+    if (binder !== this.binder && !this.binder.imports.includes(binder)) this.fail(`Unit '${node.object.name}' is not in the uses clause`, node, 'TP_UNIT_ACCESS');
+    binder.ensure(); const symbol = binder.scope.symbols.get(key(node.name));
+    if (!symbol && binder.input.form) {
+      const member = this.workspace.foreign.formMember(binder.input.form, node.name, (message, location, code) => this.fail(message, location, code), node);
+      if (member) return {...member, foreignReceiver: node.object, foreignReceiverType: {...foreignType(binder.input.form.type || 'Form'), name: binder.name, vb: binder.name}};
+    }
+    if (!symbol || binder !== this.binder && !symbol.public) this.fail(`Unit member '${node.object.name}.${node.name}' is not exported`, node, 'TP_PRIVATE_MEMBER');
+    return binder.resolveSymbol(symbol);
+  }
+  controlArrayIndex(node, context) {
+    if (node.kind !== 'call') return null;
+    const symbol = node.callee.kind === 'identifier' ? this.resolve(node.callee, context, false) : this.memberSymbol(node.callee, context);
+    if (symbol?.kind === 'procedure' || symbol?.kind === 'foreignProperty') return null;
+    const type = symbol?.type || (node.callee.kind === 'identifier' ? null : this.typeOf(node.callee, context));
+    return pascalControlArrayIndex(node, type) || (type?.kind === 'array' && type.foreign ? {...node, kind: 'index', object: node.callee, indices: node.args} : null);
+  }
+  typeOf(node, context) {
+    if (!node) return PASCAL_TYPES.variant;
+    if (node.kind === 'group') return this.typeOf(node.expression, context);
+    if (node.kind === 'number' || node.kind === 'string' || node.kind === 'boolean') return this.binder.constant(node, context.scope).type;
+    if (node.kind === 'nil') return {kind: 'nil', name: 'nil', vb: 'Long'};
+    if (node.kind === 'inherited') return this.memberSymbol(node, context)?.returnType || PASCAL_TYPES.variant;
+    if (node.kind === 'identifier') {
+      const symbol = this.resolve(node, context, false);
+      if (symbol) return symbol.kind === 'procedure' ? symbol.returnType || PASCAL_TYPES.variant : symbol.type;
+      if (Object.hasOwn(INTRINSIC_TYPES, key(node.name))) return PASCAL_TYPES[INTRINSIC_TYPES[key(node.name)]];
+      this.fail(`Unknown identifier '${node.name}'`, node, 'TP_UNKNOWN_IDENTIFIER');
+    }
+    if (node.kind === 'member') {
+      const symbol = this.memberSymbol(node, context); if (symbol) return symbol.kind === 'procedure' ? symbol.returnType || PASCAL_TYPES.variant : symbol.type;
+      const type = this.typeOf(node.object, context), field = type.fields?.get(key(node.name));
+      if (type.kind === 'record' && !field) this.fail(`Record '${type.name}' has no field '${node.name}'`, node, 'TP_UNKNOWN_FIELD');
+      const member = type.catalogName ? builtinType(type.catalogName)?.members.find(value => key(value.name) === key(node.name)) : null;
+      if (field) return field.type;
+      if (member) return foreignType(member.type);
+      if (type.kind !== 'variant' && !(type.kind === 'object' && key(type.name) === 'object')) this.fail(`Type '${type.name || type.kind}' has no member '${node.name}'`, node, 'TP_UNKNOWN_MEMBER');
+      return PASCAL_TYPES.variant;
+    }
+    if (node.kind === 'index') {
+      const type = this.typeOf(node.object, context);
+      if (isString(type)) {if (node.indices.length !== 1) this.fail('String indexing requires one ordinal index', node); return PASCAL_TYPES.char;}
+      if (type.kind !== 'array') this.fail('Only arrays and strings can be indexed', node, 'TP_INDEX_TYPE');
+      if (type.controlArray && (node.indices.length !== 1 || !isOrdinal(this.typeOf(node.indices[0], context)))) this.fail('Control arrays require exactly one ordinal index', node, 'TP_INDEX_TYPE');
+      if (!node.indices.length) this.fail('Array indexing requires at least one ordinal index', node, 'TP_INDEX_COUNT');
+      if (node.indices.length > type.dimensions.length && !type.open && !type.dynamic) this.fail('Too many array indices', node, 'TP_INDEX_COUNT');
+      return type.open || type.dynamic || node.indices.length === type.dimensions.length ? type.element : {...type, dimensions: type.dimensions.slice(node.indices.length)};
+    }
+    if (node.kind === 'dereference') {const type = this.typeOf(node.object, context); if (type.kind !== 'pointer') this.fail('Dereference requires a typed pointer', node, 'TP_POINTER_TYPE'); return type.target;}
+    if (node.kind === 'unary') {if (node.operator === '@') this.fail('Routine and storage addresses require procedural-pointer lowering', node, 'TP_UNSUPPORTED_POINTER'); if (['+','-'].includes(node.operator) && numericLiteral(node.operand)) return this.binder.constant(node, context.scope).type; const operand = this.typeOf(node.operand, context); return isBoolean(operand) ? PASCAL_TYPES.boolean : isNumeric(operand) ? numericType(operand, operand) : operand;}
+    if (node.kind === 'binary') {
+      const left = this.typeOf(node.left, context), right = this.typeOf(node.right, context);
+      if (['=', '<>', '<', '>', '<=', '>=', 'in'].includes(node.operator)) return PASCAL_TYPES.boolean;
+      if (node.operator === 'shl' || node.operator === 'shr') return left;
+      if (left.kind === 'set' || right.kind === 'set') return left.kind === 'set' ? left : right;
+      if (node.operator === '+' && isString(left) && isString(right)) return PASCAL_TYPES.string;
+      if (isBoolean(left) && isBoolean(right)) return PASCAL_TYPES.boolean;
+      const common = numericType(left, right); return node.operator === '/' && common.kind !== 'real' ? PASCAL_TYPES.real : common;
+    }
+    if (node.kind === 'set') {
+      let base = null;
+      for (const element of node.elements) {const type = this.typeOf(element.low, context); if (!isOrdinal(type)) this.fail('Set element must be ordinal', element.low); if (base && !sameType(base, type) && !(isNumeric(base) && isNumeric(type))) this.fail('Set members require compatible ordinal types', element.low); base ||= type;}
+      return {kind: 'set', vb: 'String', base};
+    }
+    if (node.kind === 'call') {
+      const indexed = this.controlArrayIndex(node, context); if (indexed) return this.typeOf(indexed, context);
+      const name = node.callee.kind === 'identifier' ? key(node.callee.name) : null;
+      const symbol = node.callee.kind === 'identifier' ? this.resolve(node.callee, context, false) : this.memberSymbol(node.callee, context);
+      if (symbol?.kind === 'type') return symbol.type;
+      if (symbol?.kind === 'result') return symbol.procedure.returnType;
+      if (symbol?.kind === 'procedure') return symbol.returnType || PASCAL_TYPES.variant;
+      if (symbol?.kind === 'foreignProperty') return symbol.type;
+      if (['succ', 'pred', 'abs'].includes(name) && node.args.length) return this.typeOf(node.args[0], context);
+      if (name === 'sqr' && node.args.length) {const type = this.typeOf(node.args[0], context); return numericType(type, type);}
+      if (name === 'random' && node.args.length) return PASCAL_TYPES.integer;
+      if (name && INTRINSIC_TYPES[name]) return PASCAL_TYPES[INTRINSIC_TYPES[name]];
+      if (node.callee.kind === 'member' && this.typeOf(node.callee.object, context).kind !== 'record') return this.typeOf(node.callee, context);
+      if (symbol?.kind === 'external') return symbol.type;
+      this.fail(`Unknown Pascal function '${name || node.callee.name || '<expression>'}'`, node, 'TP_UNKNOWN_ROUTINE');
+    }
+    if (node.kind === 'formatted') return this.typeOf(node.value, context);
+    this.fail(`Expression '${node.kind}' requires unsupported storage semantics`, node, 'TP_UNSUPPORTED_EXPRESSION');
+  }
+  ordinal(node, context) {const type = this.typeOf(node, context), value = this.expression(node, context); return ['char', 'boolean'].includes(type.kind) || type.kind === 'subrange' && ['char', 'boolean'].includes(type.base.kind) ? this.callHelper('ord', [value]) : value;}
+  range(value, type, context, node) {
+    if (type.foreign) return value;
+    if (type.kind === 'string') return this.callHelper('shortString', [value, number(type.capacity)]);
+    if (type.kind === 'set' && type.base) return this.callHelper('setIntersect', [value, this.callHelper('setRange', [number(type.base.low), number(type.base.high)])]);
+    if (type.kind === 'real' && type.name === 'Real') return this.callHelper('real48', [value]);
+    if (type.kind === 'subrange' && !isNumeric(type.base) && this.flag('rangeChecks', node)) {
+      if (context.pure) {const ordinal = isCharacter(type) || isBoolean(type) ? this.callHelper('ord', [value]) : value, checked = `__PascalDebugRange(${ordinal}, ${number(type.low)}, ${number(type.high)})`; return isCharacter(type) ? this.callHelper('chr', [checked]) : isBoolean(type) ? `(${checked} <> 0&)` : checked;}
+      const temporary = this.temporary(context, baseType(type), node, 'subrange'); this.emit(context, `${temporary} = ${value}`, node, true);
+      const ordinal = isCharacter(type) || isBoolean(type) ? this.callHelper('ord', [temporary]) : temporary;
+      this.emit(context, `If ${ordinal} < ${number(type.low)} Or ${ordinal} > ${number(type.high)} Then Err.Raise 201, "Turbo Pascal", "Subrange check failed"`, node, true); return temporary;
+    }
+    if (type.kind === 'ordinal' || type.kind === 'subrange' && isNumeric(type.base)) {
+      if (type.kind === 'subrange' && this.flag('rangeChecks', node)) {if (context.pure) value = `__PascalDebugRange(${value}, ${number(type.low)}, ${number(type.high)})`; else {const temporary = this.temporary(context, PASCAL_TYPES.longint, node, 'range'); this.emit(context, `${temporary} = ${value}`, node, true); this.emit(context, `If ${temporary} < ${number(type.low)} Or ${temporary} > ${number(type.high)} Then Err.Raise 201, "Turbo Pascal", "Subrange check failed"`, node, true); value = temporary;}}
+      return this.callHelper('ordinal', [value, number(type.bits), bool(type.signed), bool(this.flag('rangeChecks', node))]);
+    }
+    if (type.kind === 'enum' && this.flag('rangeChecks', node)) {if (context.pure) return `__PascalDebugRange(${value}, ${number(type.low)}, ${number(type.high)})`; const temporary = this.temporary(context, PASCAL_TYPES.integer, node, 'enum'); this.emit(context, `${temporary} = ${value}`, node, true); this.emit(context, `If ${temporary} < ${number(type.low)} Or ${temporary} > ${number(type.high)} Then Err.Raise 201, "Turbo Pascal", "Enumeration range check failed"`, node, true); return temporary;}
+    return value;
+  }
+  expression(node, context, {lvalue = false, forceCall = false} = {}) {
+    if (node.kind === 'group') return `(${this.expression(node.expression, context, {lvalue, forceCall})})`;
+    if (['number', 'string', 'boolean'].includes(node.kind)) {const constant = this.binder.constant(node, context.scope); return this.literal(constant.value, constant.type);}
+    if (node.kind === 'nil') return '0&';
+    if (node.kind === 'inherited') return this.routineCall(this.memberSymbol(node, context), [], context, node);
+    if (node.kind === 'identifier') {
+      const symbol = this.resolve(node, context, false);
+      if (!symbol && Object.hasOwn(INTRINSIC_TYPES, key(node.name))) return this.expression({...node, kind: 'call', callee: node, args: []}, context);
+      if (!symbol) this.fail(`Unknown identifier '${node.name}'`, node, 'TP_UNKNOWN_IDENTIFIER');
+      if (symbol.foreign) return foreignExpression(this, symbol, context, node, {lvalue});
+      if (symbol.kind === 'type') this.fail('Type identifier cannot be used as a value', node);
+      if (symbol.kind === 'withField') return symbol.access;
+      if (symbol.kind === 'procedure' && !lvalue || symbol.kind === 'result' && forceCall) return this.routineCall(symbol.kind === 'result' ? symbol.procedure : symbol, [], context, node);
+      if (symbol.kind === 'constant' || symbol.kind === 'enumMember') return this.literal(symbol.value, symbol.type);
+      return this.access(symbol, context);
+    }
+    if (node.kind === 'member') {
+      const symbol = this.memberSymbol(node, context);
+      if (symbol?.foreign) return foreignExpression(this, symbol, context, node, {lvalue});
+      if (symbol) return symbol.kind === 'procedure' && !lvalue ? this.routineCall(symbol, [], context, node) : symbol.kind === 'constant' || symbol.kind === 'enumMember' ? this.literal(symbol.value, symbol.type) : this.access(symbol, context);
+      this.typeOf(node, context);
+      return `${this.expression(node.object, context, {lvalue: true})}.${identifier(node.name)}`;
+    }
+    if (node.kind === 'index') {
+      const type = this.typeOf(node.object, context); this.typeOf(node, context);
+      if (isString(type)) {if (lvalue) this.fail('String characters require the Pascal character setter', node, 'TP_STRING_LVALUE'); return this.callHelper('stringGet', [this.expression(node.object, context), this.ordinal(node.indices[0], context)]);}
+      const indices = [], levels = []; let object = node;
+      while (object.kind === 'index' && this.typeOf(object.object, context).kind === 'array') {levels.unshift(object); object = object.object;}
+      for (const level of levels) for (const index of level.indices) {if (!isOrdinal(this.typeOf(index, context))) this.fail('Array index must be ordinal', index, 'TP_INDEX_TYPE'); indices.push(this.ordinal(index, context));}
+      const source = this.expression(object, context, {lvalue: true}), baseType = this.typeOf(object, context);
+      if (baseType.open) {if (indices.length !== 1) this.fail('Open array indexing requires one ordinal index', node, 'TP_INDEX_COUNT'); indices[0] = `(${indices[0]} + LBound(${source}))`;}
+      return `${source}(${indices.join(', ')})`;
+    }
+    if (node.kind === 'dereference') {
+      const type = this.typeOf(node.object, context); this.typeOf(node, context); const storage = pascalPointerStorage(type, this.binder);
+      return `${storage.heap}(${storage.validate}(${this.expression(node.object, context)}))${storage.wrapper}`;
+    }
+    if (node.kind === 'set') {
+      let expression = '""';
+      for (const element of node.elements) {const low = this.ordinal(element.low, context), range = element.high ? this.callHelper('setRange', [low, this.ordinal(element.high, context)]) : this.callHelper('setRange', [low, low]); expression = this.callHelper('setUnion', [expression, range]);}
+      return expression;
+    }
+    if (node.kind === 'unary') {
+      if (['+','-'].includes(node.operator) && numericLiteral(node.operand)) {const constant = this.binder.constant(node, context.scope); return this.literal(constant.value, constant.type);}
+      const type = this.typeOf(node, context), value = this.expression(node.operand, context);
+      if (node.operator === 'not') {if (isBoolean(type)) return `(Not ${value})`; if (!isNumeric(type) || type.kind === 'real') this.fail('Not requires a Boolean or integer operand', node); return this.callHelper('ordinal', [`(Not ${value})`, number(type.bits), bool(type.signed), 'False']);}
+      if (!isNumeric(type)) this.fail('Unary sign requires a numeric operand', node);
+      return node.operator === '-' && type.kind !== 'real' ? type.name === 'Word' ? this.callHelper('wordSub', ['0&', value, bool(this.flag('overflowChecks', node))]) : this.callHelper('intSub', ['0&', value, number(type.bits || 16), bool(this.flag('overflowChecks', node))]) : `(${node.operator}${value})`;
+    }
+    if (node.kind === 'binary') return this.binary(node, context);
+    if (node.kind === 'call') return this.call(node, context);
+    this.fail(`Unsupported expression '${node.kind}'`, node, 'TP_UNSUPPORTED_EXPRESSION');
+  }
+  binary(node, context) {
+    const leftType = this.typeOf(node.left, context), rightType = this.typeOf(node.right, context), resultType = this.typeOf(node, context), op = node.operator;
+    if (['and', 'or'].includes(op) && isBoolean(leftType) && isBoolean(rightType) && !this.flag('completeBoolean', node)) {
+      if (context.pure) return `__PascalDebug${op === 'and' ? 'And' : 'Or'}(${this.expression(node.left, context)}, ${this.expression(node.right, context)})`;
+      const temporary = this.temporary(context, PASCAL_TYPES.boolean, node, 'boolean'); this.emit(context, `${temporary} = ${this.expression(node.left, context)}`, node, true);
+      this.emit(context, `If ${op === 'and' ? temporary : `Not ${temporary}`} Then`, node, true); this.emit(context, `${temporary} = ${this.expression(node.right, context)}`, node, true); this.emit(context, 'End If', node, true); return temporary;
+    }
+    const left = this.expression(node.left, context), right = this.expression(node.right, context);
+    if (leftType.kind === 'set' || rightType.kind === 'set') {
+      if (op === 'in') {if (!isOrdinal(leftType) || rightType.kind !== 'set') this.fail('In requires an ordinal value and a set', node); return this.callHelper('setContains', [right, isCharacter(leftType) || isBoolean(leftType) ? this.callHelper('ord', [left]) : left]);}
+      if (leftType.kind !== 'set' || rightType.kind !== 'set') this.fail('Set operator requires two sets', node);
+      const helpers = {'+': 'setUnion', '*': 'setIntersect', '-': 'setDifference', '=': 'setEqual', '<>': 'setEqual', '<=': 'setSubset', '>=': 'setSubset'};
+      if (!helpers[op]) this.fail(`Operator '${op}' is not defined for sets`, node, 'TP_OPERATOR_TYPE');
+      const value = this.callHelper(helpers[op], op === '>=' ? [right, left] : [left, right]); return op === '<>' ? `(Not ${value})` : value;
+    }
+    if (op === 'in') this.fail('Right operand of In must be a set', node);
+    if (['=', '<>', '<', '>', '<=', '>='].includes(op)) {
+      if (!assignmentCompatible(leftType, rightType) && !assignmentCompatible(rightType, leftType) || isAggregate(leftType)) this.fail('Comparison operands have incompatible types', node, 'TP_OPERATOR_TYPE');
+      if (isBoolean(leftType) && isBoolean(rightType) && !['=', '<>'].includes(op)) return `(${this.callHelper('ord', [left])} ${op} ${this.callHelper('ord', [right])})`;
+      if (leftType.kind === 'pointer' || rightType.kind === 'pointer') {if (!['=', '<>'].includes(op)) this.fail('Pointer values support only equality comparisons', node, 'TP_POINTER_OPERATOR');}
+      return `(${left} ${op} ${right})`;
+    }
+    if (op === '+' && isString(leftType) && isString(rightType)) return `(${left} & ${right})`;
+    if (isBoolean(leftType) || isBoolean(rightType)) {if (!isBoolean(leftType) || !isBoolean(rightType) || !['and', 'or', 'xor'].includes(op)) this.fail('Invalid Boolean operator', node, 'TP_OPERATOR_TYPE'); return `(${left} ${op} ${right})`;}
+    if (!isNumeric(leftType) || !isNumeric(rightType)) this.fail(`Operator '${op}' requires numeric operands`, node, 'TP_OPERATOR_TYPE');
+    if (['div', 'mod', 'and', 'or', 'xor', 'shl', 'shr'].includes(op) && (leftType.kind === 'real' || rightType.kind === 'real')) this.fail(`Operator '${op}' requires integer operands`, node, 'TP_OPERATOR_TYPE');
+    if (['+', '-', '*'].includes(op) && resultType.kind !== 'real') return resultType.name === 'Word' ? this.callHelper({'+': 'wordAdd', '-': 'wordSub', '*': 'wordMul'}[op], [left, right, bool(this.flag('overflowChecks', node))]) : this.callHelper({'+': 'intAdd', '-': 'intSub', '*': 'intMul'}[op], [left, right, number(resultType.bits || 16), bool(this.flag('overflowChecks', node))]);
+    if (op === 'div' || op === 'mod') return this.callHelper(op, [left, right]);
+    if (op === 'shl' || op === 'shr') return this.callHelper(op === 'shl' ? 'shiftLeft' : 'shiftRight', [left, right, number(leftType.bits || 16), bool(leftType.signed !== false)]);
+    if (resultType.kind === 'real' && resultType.name === 'Real') return this.callHelper('real48', [`(${left} ${op} ${right})`]);
+    return `(${left} ${op} ${right})`;
+  }
+  count(node, minimum, maximum = minimum) {if (node.args.length < minimum || node.args.length > maximum) this.fail(`'${node.callee.name}' expects ${minimum === maximum ? minimum : `${minimum}..${maximum}`} argument(s)`, node, 'TP_ARGUMENT_COUNT');}
+  call(node, context) {
+    const indexed = this.controlArrayIndex(node, context); if (indexed) return this.expression(indexed, context);
+    const name = node.callee.kind === 'identifier' ? key(node.callee.name) : null;
+    const symbol = name ? this.resolve(node.callee, context, false) : this.memberSymbol(node.callee, context);
+    if (symbol?.foreign) return foreignCall(this, symbol, node.args, context, node);
+    if (symbol?.kind === 'type') {this.count(node, 1); if (symbol.type.name === 'Extended') this.fail('Extended requires 80-bit floating point storage; supported real types are Real48, Single and Double', node, 'TP_UNSUPPORTED_REAL80'); const value = this.expression(node.args[0], context); if (symbol.type.kind === 'char') return this.callHelper('chr', [value]); if (symbol.type.kind === 'boolean') return `(${value} <> 0&)`; if (isNumeric(symbol.type)) return this.range(symbol.type.kind === 'real' ? `CDbl(${value})` : `Fix(${value})`, symbol.type, context, node); this.fail('This type cast requires storage reinterpretation', node, 'TP_UNSUPPORTED_CAST');}
+    if (symbol?.kind === 'procedure' || symbol?.kind === 'result') return this.routineCall(symbol.kind === 'result' ? symbol.procedure : symbol, node.args, context, node);
+    if (!symbol && name) {
+      const fileExpression = this.files.expression(node, context); if (fileExpression !== null) return fileExpression;
+      if (['ord', 'chr', 'upcase', 'round', 'trunc', 'frac'].includes(name)) {this.count(node, 1); const type = this.typeOf(node.args[0], context); if (name === 'ord' && !isOrdinal(type) || name === 'upcase' && !isCharacter(type) || name === 'chr' && (!isNumeric(type) || type.kind === 'real') || ['round','trunc','frac'].includes(name) && !isNumeric(type)) this.fail(`Invalid argument type for ${node.callee.name}`, node.args[0], 'TP_ARGUMENT_TYPE'); return this.callHelper(name, [this.expression(node.args[0], context)]);}
+      if (name === 'copy' || name === 'pos') {this.count(node, name === 'copy' ? 3 : 2); return this.callHelper(name, node.args.map(arg => this.expression(arg, context)));}
+      if (DIRECT_CALLS[name]) {this.count(node, 1); const type = this.typeOf(node.args[0], context); if (name === 'length' ? !isString(type) : !isNumeric(type)) this.fail(`Invalid argument type for ${node.callee.name}`, node.args[0], 'TP_ARGUMENT_TYPE'); const value = `${DIRECT_CALLS[name]}(${this.expression(node.args[0], context)})`; return name === 'length' ? value : this.callHelper('real48', [value]);}
+      if (name === 'abs') {this.count(node, 1); return `Abs(${this.expression(node.args[0], context)})`;}
+      if (name === 'sqr') {this.count(node, 1); const type = this.typeOf(node, context); if (!isNumeric(type)) this.fail('Sqr requires a numeric argument', node.args[0], 'TP_ARGUMENT_TYPE'); if (context.pure) return `__PascalDebugSqr(${this.expression(node.args[0], context)}, ${number(type.kind === 'real' ? 0 : type.bits || 16)}, ${bool(this.flag('overflowChecks', node))}${type.name === 'Word' ? ', False' : ''})`; const value = this.temporary(context, type, node); this.emit(context, `${value} = ${this.expression(node.args[0], context)}`, node, true); return type.kind === 'real' ? type.name === 'Real' ? this.callHelper('real48', [`(${value} * ${value})`]) : `(${value} * ${value})` : type.name === 'Word' ? this.callHelper('wordMul', [value, value, bool(this.flag('overflowChecks', node))]) : this.callHelper('intMul', [value, value, number(type.bits || 16), bool(this.flag('overflowChecks', node))]);}
+      if (name === 'odd') {this.count(node, 1); const type = this.typeOf(node.args[0], context); if (!isNumeric(type) || type.kind === 'real') this.fail('Odd requires an integer', node); return `((${this.expression(node.args[0], context)} And 1&) <> 0&)`;}
+      if (name === 'succ' || name === 'pred') {this.count(node, 1); const type = this.typeOf(node.args[0], context); if (!isOrdinal(type)) this.fail('Succ/Pred require an ordinal argument', node); const value = `(${this.ordinal(node.args[0], context)} ${name === 'succ' ? '+' : '-'} 1&)`; return this.range(isCharacter(type) ? this.callHelper('chr', [value]) : isBoolean(type) ? `(${value} <> 0&)` : value, type, context, node);}
+      if (name === 'concat') return `(${node.args.map(arg => this.expression(arg, context)).join(' & ') || '""'})`;
+      if (name === 'low' || name === 'high') {
+        this.count(node, 1); const type = this.typeOf(node.args[0], context); let value = type[name];
+        if (type.kind === 'array') {if (type.controlArray) return `${this.expression(node.args[0], context, {lvalue: true})}.${name === 'low' ? 'LBound' : 'UBound'}`; if (type.dynamic) return `${name === 'low' ? 'LBound' : 'UBound'}(${this.expression(node.args[0], context, {lvalue: true})})`; if (type.open) {const source = this.expression(node.args[0], context, {lvalue: true}); return name === 'low' ? '0&' : `(UBound(${source}) - LBound(${source}))`;} value = type.dimensions[0][name];}
+        if (type.kind === 'string') value = name === 'low' ? 0 : type.capacity;
+        if (value === undefined) this.fail('Low/High require an ordinal type, string, or array', node); return number(value);
+      }
+      if (name === 'sizeof') {this.count(node, 1); const type = this.typeOf(node.args[0], context); if (type.kind === 'array' && type.open) {const source = this.expression(node.args[0], context, {lvalue: true}); return `((UBound(${source}) - LBound(${source}) + 1&) * ${number(this.sizeOf(type.element, node))})`;} return number(this.sizeOf(type, node));}
+      if (name === 'random') {this.count(node, 0, 1); return node.args.length ? `Int(Rnd() * ${this.expression(node.args[0], context)})` : 'Rnd()';}
+      if (name === 'paramcount') {this.count(node, 0); this.fail('Command-line arguments require the host parameter adapter', node, 'TP_UNSUPPORTED_HOST_IO');}
+      if (name === 'paramstr') {this.count(node, 1); this.fail('Command-line arguments require the host parameter adapter', node, 'TP_UNSUPPORTED_HOST_IO');}
+      if (name === 'keypressed' || name === 'readkey') this.fail('Crt keyboard polling requires a terminal host adapter', node, 'TP_UNSUPPORTED_CRT');
+    }
+    if (node.callee.kind === 'member' || symbol?.kind === 'external') return `${this.expression(node.callee, context, {lvalue: true})}(${node.args.map(arg => this.expression(arg, context)).join(', ')})`;
+    this.fail(`Unknown Pascal routine '${name || node.callee.name}'`, node, 'TP_UNKNOWN_ROUTINE');
+  }
+  sizeOf(type, node) {
+    const objectSize = objectTypeSizeOf(this, type, node); if (objectSize !== null) return objectSize;
+    if (type.kind === 'ordinal') return type.bits / 8;
+    if (type.kind === 'pointer') return 4;
+    if (['char', 'boolean', 'enum'].includes(type.kind)) return 1;
+    if (type.kind === 'subrange') return type.low >= 0 && type.high <= 255 ? 1 : type.low >= -32768 && type.high <= 32767 ? 2 : 4;
+    if (type.kind === 'real') return {Real: 6, Single: 4, Double: 8, Extended: 10}[type.name];
+    if (type.kind === 'string') return type.capacity + 1;
+    if (type.kind === 'set') return Math.ceil((type.base.high + 1) / 8) - Math.floor(type.base.low / 8);
+    if (type.kind === 'array') return type.dimensions.reduce((total, dimension) => total * (dimension.high - dimension.low + 1), this.sizeOf(type.element, node));
+    if (type.kind === 'record') return [...type.fields.values()].reduce((total, field) => total + this.sizeOf(field.type, node), 0);
+    this.fail('SizeOf requires a statically sized Turbo Pascal type', node, 'TP_SIZEOF');
+  }
+  routineCall(symbol, args, context, node) {
+    if (symbol.foreign) return foreignCall(this, symbol, args, context, node);
+    const objectCall = objectRoutineCall(this, symbol, args, context, node); if (objectCall !== null) return objectCall;
+    return `${this.access(symbol, context)}(${this.routineArguments(symbol, args, context, node).join(', ')})`;
+  }
+  routineArguments(symbol, args, context, node) {
+    if (args.length !== symbol.params.length) this.fail(`Routine '${symbol.name}' expects ${symbol.params.length} argument(s), received ${args.length}`, node, 'TP_ARGUMENT_COUNT');
+    const values = args.map((arg, index) => {
+      const param = symbol.params[index], actual = this.typeOf(arg, context);
+      if (param.byRef) {this.assignable(arg, context); if (!sameType(param.type, actual) && !objectReferenceCompatible(param.type, actual) && !(param.type.kind === 'array' && param.type.open && actual.kind === 'array' && sameType(param.type.element, actual.element))) this.fail(`Var parameter '${param.name}' requires exactly ${param.type.name}`, arg, 'TP_VAR_PARAMETER_TYPE'); return context.pure ? this.expression(arg, context, {lvalue: true}) : this.freezeReference(arg, context);}
+      if (!assignmentCompatible(param.type, actual)) this.fail(`Argument '${param.name}' has incompatible type`, arg, 'TP_ARGUMENT_TYPE');
+      if (context.pure) return isAggregate(param.type) ? this.expression(arg, context, {lvalue: true}) : this.range(this.expression(arg, context), param.type, context, arg);
+      if (isAggregate(param.type)) {
+        const source = this.freezeReference(arg, context), name = `__Pascal_argument_${this.tempId++}`, destination = identifier(name), type = param.type.kind === 'array' && param.type.open ? actual : param.type;
+        this.emit(context, `Dim ${this.declaration(name, type)}`, arg, true);
+        if (lowerObjectValueParameter(this, {...param, name, vbName: name}, source, context)) return destination;
+        if (type.kind === 'array' && type.open) {
+          const index = this.temporary(context, PASCAL_TYPES.longint, arg, 'argumentIndex');
+          this.emit(context, `ReDim ${destination}(0& To UBound(${source}) - LBound(${source}))`, arg, true);
+          this.emit(context, `For ${index} = 0& To UBound(${destination})`, arg, true);
+          this.emit(context, `${destination}(${index}) = ${source}(${index} + LBound(${source}))`, arg, true);
+          this.emit(context, `Next ${index}`, arg, true);
+        } else if (type.kind === 'array') this.copyArray(destination, source, type, context, arg, actual);
+        else this.emit(context, `${destination} = ${source}`, arg, true);
+        return destination;
+      }
+      const value = this.range(this.expression(arg, context), param.type, context, arg), temporary = this.temporary(context, param.type, arg, 'argument');
+      this.emit(context, `${temporary} = ${value}`, arg, true); return temporary;
+    });
+    for (const capture of symbol.captures) values.push(this.access(capture.symbol, context));
+    return values;
+  }
+  assignable(node, context) {
+    const indexed = this.controlArrayIndex(node, context); if (indexed) return this.assignable(indexed, context);
+    if (node.kind === 'group') return this.assignable(node.expression, context);
+    if (node.kind === 'call') {const symbol = node.callee.kind === 'identifier' ? this.resolve(node.callee, context, false) : this.memberSymbol(node.callee, context); if (symbol?.foreign) return foreignAssignable(this, symbol, node);}
+    if (node.kind === 'identifier') {const symbol = this.resolve(node, context); if (context.activeControls.has(symbol)) this.fail('For control variable cannot be modified inside its loop', node, 'TP_FOR_VARIABLE'); if (symbol.foreign) return foreignAssignable(this, symbol, node); if (!['variable', 'parameter', 'result', 'withField', 'control', 'external'].includes(symbol.kind)) this.fail(`Cannot assign to '${node.name}'`, node, 'TP_ASSIGNMENT'); if (symbol.kind === 'parameter' && symbol.param.constant) this.fail(`Cannot modify const parameter '${node.name}'`, node, 'TP_ASSIGNMENT'); if (context.activeControls.has(symbol)) this.fail('For control variable cannot be modified inside its loop', node, 'TP_FOR_VARIABLE'); return symbol;}
+    if (node.kind === 'member') {const symbol = this.memberSymbol(node, context); if (context.activeControls.has(symbol)) this.fail('For control variable cannot be modified inside its loop', node, 'TP_FOR_VARIABLE'); if (symbol?.foreign) return foreignAssignable(this, symbol, node); if (symbol && !['variable', 'parameter'].includes(symbol.kind)) this.fail('Exported member is not assignable', node, 'TP_ASSIGNMENT'); if (!symbol) this.assignable(node.object, context); return symbol;}
+    if (node.kind === 'index') {this.assignable(node.object, context); this.typeOf(node, context); return null;}
+    if (node.kind === 'dereference') {this.typeOf(node, context); return null;}
+    this.fail('Variable reference required', node, 'TP_ASSIGNMENT');
+  }
+  assign(target, value, context, node, {allowControl = false} = {}) {
+    if (!allowControl) this.assignable(target, context);
+    const targetType = this.typeOf(target, context), valueType = this.typeOf(value, context);
+    if (targetType.kind === 'file') this.fail('File variables cannot be copied by assignment', node, 'TP_FILE_ASSIGNMENT');
+    if (!assignmentCompatible(targetType, valueType)) this.fail(`Cannot assign ${valueType.name || valueType.kind} to ${targetType.name || targetType.kind}`, node, 'TP_ASSIGNMENT_TYPE');
+    if (foreignAssignment(this, target, value, context, node)) return;
+    if (lowerObjectAssignment(this, target, value, context, node)) return;
+    if (target.kind === 'index' && isString(this.typeOf(target.object, context))) {const objectType = this.typeOf(target.object, context); this.emit(context, `Call ${this.helper('stringSet')}(${this.expression(target.object, context, {lvalue: true})}, ${this.ordinal(target.indices[0], context)}, ${this.expression(value, context)}, ${number(objectType.capacity)})`, node); return;}
+    const destination = this.expression(target, context, {lvalue: true}), source = value.kind === 'nil' && targetType.kind === 'object' ? 'Nothing' : this.expression(value, context, {lvalue: isAggregate(valueType)});
+    if (targetType.kind === 'array') this.copyArray(destination, source, targetType, context, node);
+    else this.emit(context, `${targetType.kind === 'object' ? 'Set ' : ''}${destination} = ${this.range(source, targetType, context, node)}`, node);
+  }
+  copyArray(destination, source, type, context, node, sourceType = type) {
+    if (type.open) this.fail('Assignment to a whole open array requires a fixed target shape', node, 'TP_OPEN_ARRAY_ASSIGNMENT');
+    const indices = type.dimensions.map(() => this.temporary(context, PASCAL_TYPES.longint, node, 'index'));
+    for (let i = 0; i < indices.length; i++) this.emit(context, `For ${indices[i]} = ${number(type.dimensions[i].low)} To ${number(type.dimensions[i].high)}`, node, true);
+    this.emit(context, `${destination}(${indices.join(', ')}) = ${source}(${indices.map((name, i) => sourceType.open ? `${name} - ${number(type.dimensions[i].low)} + LBound(${source}, ${i + 1})` : name).join(', ')})`, node, true);
+    for (let i = indices.length - 1; i >= 0; i--) this.emit(context, `Next ${indices[i]}`, node, true);
+  }
+  statement(node, context) {
+    switch (node.kind) {
+      case 'empty': return;
+      case 'block': for (const statement of node.statements) this.statement(statement, context); return;
+      case 'assignment': this.assign(node.target, node.value, context, node); return;
+      case 'callStatement': this.callStatement(node.expression, context, node); return;
+      case 'if': {const type = this.typeOf(node.test, context); if (!isBoolean(type) && type.kind !== 'variant') this.fail('If condition must be Boolean', node.test); this.emit(context, `If ${this.expression(node.test, context)} Then`, node.test); this.statement(node.consequent, context); if (node.alternate) {this.emit(context, 'Else', node.alternate, true); this.statement(node.alternate, context);} this.emit(context, 'End If', node, true); return;}
+      case 'while': case 'repeat': this.loop(node, context); return;
+      case 'for': this.forLoop(node, context); return;
+      case 'case': this.caseStatement(node, context); return;
+      case 'with': {
+        const count = context.withObjects.length;
+        for (const object of node.objects) {const type = this.typeOf(object, context); if (type.kind !== 'record') this.fail('With requires a record variable', object); this.assignable(object, context); context.withObjects.push({type, source: this.freezeReference(object, context)});}
+        this.statement(node.body, context); context.withObjects.length = count; return;
+      }
+      case 'goto': this.emit(context, `GoTo ${identifier(`__PascalLabel_${node.label}`)}`, node); return;
+      case 'label': this.emit(context, `${identifier(`__PascalLabel_${node.label}`)}:`, node, true); this.statement(node.statement, context); return;
+      case 'assembly': this.fail('Inline 8086 assembly requires a machine-code emulator and cannot be silently translated to JavaScript or native host instructions', node, 'TP_UNSUPPORTED_ASM'); break;
+      default: this.fail(`Unsupported statement '${node.kind}'`, node);
+    }
+  }
+  freezeReference(node, context) {
+    const indexed = this.controlArrayIndex(node, context); if (indexed) return this.freezeReference(indexed, context);
+    if (node.kind === 'group') return this.freezeReference(node.expression, context);
+    if (node.kind === 'identifier') return this.expression(node, context, {lvalue: true});
+    if (node.kind === 'member') {const symbol = this.memberSymbol(node, context); if (symbol?.foreign) return foreignAccess(this, symbol, context, {freeze: true}); return symbol ? this.access(symbol, context) : `${this.freezeReference(node.object, context)}.${identifier(node.name)}`;}
+    if (node.kind === 'index') {
+      const levels = []; let object = node;
+      while (object.kind === 'index' && this.typeOf(object.object, context).kind === 'array') {levels.unshift(object); object = object.object;}
+      if (!levels.length) this.fail('String characters cannot be passed as direct var references', node, 'TP_STRING_LVALUE');
+      const source = this.freezeReference(object, context), indices = levels.flatMap(level => level.indices).map(index => {const temporary = this.temporary(context, PASCAL_TYPES.longint, index, 'reference'); this.emit(context, `${temporary} = ${this.ordinal(index, context)}`, index, true); return temporary;});
+      if (this.typeOf(object, context).open) indices[0] = `(${indices[0]} + LBound(${source}))`;
+      return `${source}(${indices.join(', ')})`;
+    }
+    if (node.kind === 'dereference') {const type = this.typeOf(node.object, context), storage = pascalPointerStorage(type, this.binder), temporary = this.temporary(context, PASCAL_TYPES.longint, node, 'pointer'); this.emit(context, `${temporary} = ${storage.validate}(${this.expression(node.object, context)})`, node, true); return `${storage.heap}(${temporary})${storage.wrapper}`;}
+    this.fail('Stable variable reference required', node);
+  }
+  loop(node, context) {
+    const id = this.labels++, start = `__PascalLoop${id}`, next = `__PascalContinue${id}`, end = `__PascalBreak${id}`;
+    context.loops.push({next, end}); this.emit(context, `${identifier(start)}:`, node, true);
+    if (node.kind === 'while') {if (!isBoolean(this.typeOf(node.test, context))) this.fail('While condition must be Boolean', node.test); this.emit(context, `If Not (${this.expression(node.test, context)}) Then GoTo ${identifier(end)}`, node.test); this.statement(node.body, context); this.emit(context, `${identifier(next)}:`, node, true); this.emit(context, `GoTo ${identifier(start)}`, node, true);}
+    else {for (const statement of node.statements) this.statement(statement, context); this.emit(context, `${identifier(next)}:`, node, true); if (!isBoolean(this.typeOf(node.test, context))) this.fail('Until condition must be Boolean', node.test); this.emit(context, `If Not (${this.expression(node.test, context)}) Then GoTo ${identifier(start)}`, node.test);}
+    this.emit(context, `${identifier(end)}:`, node, true); context.loops.pop();
+  }
+  forLoop(node, context) {
+    if (node.variable.kind !== 'identifier') this.fail('For control variable must be a simple local ordinal variable', node.variable, 'TP_FOR_VARIABLE');
+    const symbol = this.assignable(node.variable, context), type = this.typeOf(node.variable, context);
+    if (!isOrdinal(type)) this.fail('For control variable must be ordinal', node.variable);
+    if (!assignmentCompatible(type, this.typeOf(node.initial, context)) || !assignmentCompatible(type, this.typeOf(node.limit, context))) this.fail('For bounds must match the ordinal control variable', node);
+    const first = this.temporary(context, PASCAL_TYPES.longint, node.initial, 'forValue'), limit = this.temporary(context, PASCAL_TYPES.longint, node.limit, 'forLimit');
+    this.emit(context, `${first} = ${this.ordinal(node.initial, context)}`, node.initial, true); this.emit(context, `${limit} = ${this.ordinal(node.limit, context)}`, node.limit, true);
+    const id = this.labels++, start = `__PascalFor${id}`, next = `__PascalContinue${id}`, end = `__PascalBreak${id}`, descending = node.direction === 'downto';
+    this.emit(context, `If ${first} ${descending ? '<' : '>'} ${limit} Then GoTo ${identifier(end)}`, node);
+    this.emit(context, `${identifier(start)}:`, node, true); this.emit(context, `${this.access(symbol, context)} = ${this.range(isCharacter(type) ? this.callHelper('chr', [first]) : isBoolean(type) ? `(${first} <> 0&)` : first, type, context, node)}`, node, true);
+    context.loops.push({next, end}); context.activeControls.add(symbol); this.statement(node.body, context); context.activeControls.delete(symbol); context.loops.pop();
+    this.emit(context, `${identifier(next)}:`, node, true); this.emit(context, `If ${first} = ${limit} Then GoTo ${identifier(end)}`, node, true); this.emit(context, `${first} = ${first} ${descending ? '-' : '+'} 1&`, node, true); this.emit(context, `GoTo ${identifier(start)}`, node, true); this.emit(context, `${identifier(end)}:`, node, true);
+  }
+  caseStatement(node, context) {
+    const type = this.typeOf(node.selector, context); if (!isOrdinal(type)) this.fail('Case selector must be ordinal', node.selector);
+    const intervals = [];
+    this.emit(context, `Select Case ${this.ordinal(node.selector, context)}`, node);
+    for (const arm of node.cases) {
+      const labels = arm.labels.map(label => {
+        const low = this.binder.constant(label.low, context.scope), high = label.high ? this.binder.constant(label.high, context.scope) : low;
+        if (!assignmentCompatible(type, low.type) || !assignmentCompatible(type, high.type)) this.fail('Case label type does not match selector', label.low);
+        const first = this.binder.ordinalValue(low), last = this.binder.ordinalValue(high);
+        if (first > last) this.fail('Case range lower bound exceeds upper bound', label.low);
+        if (intervals.some(range => first <= range.high && last >= range.low)) this.fail('Duplicate or overlapping case labels', label.low, 'TP_DUPLICATE_CASE'); intervals.push({low: first, high: last});
+        return label.high ? `${number(first)} To ${number(last)}` : number(first);
+      });
+      this.emit(context, `Case ${labels.join(', ')}`, arm, true); this.statement(arm.body, context);
+    }
+    if (node.alternate.length) {this.emit(context, 'Case Else', node, true); for (const statement of node.alternate) this.statement(statement, context);}
+    this.emit(context, 'End Select', node, true);
+  }
+  callStatement(expression, context, node) {
+    const call = expression.kind === 'call' ? expression : {...expression, kind: 'call', callee: expression, args: []}, name = call.callee.kind === 'identifier' ? key(call.callee.name) : null, symbol = name ? this.resolve(call.callee, context, false) : this.memberSymbol(call.callee, context);
+    if (!symbol && name) {
+      if (objectFailStatement(this, call, context, node)) return;
+      if (this.files.statement(call, context, node)) return;
+      if (name === 'new' || name === 'dispose') {
+        this.count(call, 1, 2); const pointer = call.args[0], type = this.typeOf(pointer, context); if (type.kind !== 'pointer') this.fail('New/Dispose require a typed pointer', pointer, 'TP_POINTER_TYPE'); const storage = pascalPointerStorage(type, this.binder);
+        let destination;
+        if (name === 'new') {this.assignable(pointer, context); destination = this.freezeReference(pointer, context);}
+        if (call.args.length === 1) {
+          if (name === 'new') this.emit(context, `${destination} = ${storage.allocate}()`, node);
+          else this.emit(context, `Call ${storage.dispose}(${this.expression(pointer, context)})`, node);
+          return;
+        }
+        const activation = call.args[1], designator = activation.kind === 'call' ? activation.callee : activation;
+        if (!type.target.isPascalObject || designator.kind !== 'identifier') this.fail('Extended New/Dispose require an object pointer and constructor/destructor designator', activation, 'TP_OBJECT_ALLOCATION');
+        const method = type.target.methods.get(key(designator.name)), required = name === 'new' ? 'constructor' : 'destructor';
+        if (!method || method.kind !== required) this.fail(`Extended ${name} requires a ${required}`, activation, 'TP_OBJECT_ALLOCATION');
+        if (method.visibility === 'private' && method.declaringType.owner !== this.binder) this.fail(`Object method '${method.name}' is private`, activation, 'TP_PRIVATE_MEMBER');
+        const handle = this.temporary(context, PASCAL_TYPES.longint, node, 'objectPointer');
+        this.emit(context, `${handle} = ${name === 'new' ? `${storage.allocate}()` : `${storage.validate}(${this.expression(pointer, context)})`}`, node, true);
+        if (name === 'new') this.emit(context, `${destination} = ${handle}`, node);
+        const methodSymbol = method.declaringType.owner.resolveSymbol(method.symbol), bound = {...methodSymbol, objectReceiverSource: `${storage.heap}(${handle})`, objectReceiverType: type.target};
+        const invocation = this.routineCall(bound, activation.kind === 'call' ? activation.args : [], context, activation);
+        if (name === 'new') {
+          this.emit(context, `If Not (${invocation}) Then`, node, true);
+          this.emit(context, `Call ${storage.dispose}(${handle})`, node, true); this.emit(context, `${destination} = 0&`, node, true); this.emit(context, 'End If', node, true);
+        } else {this.emit(context, `Call ${invocation}`, node); this.emit(context, `Call ${storage.dispose}(${handle})`, node, true);}
+        return;
+      }
+      if (name === 'write' || name === 'writeln') {
+        if (call.args.length && this.typeOf(call.args[0], context).kind === 'file') {this.files.write(call, context, node, name === 'writeln'); return;}
+        const values = call.args.map(arg => this.files.format(arg, context));
+        this.emit(context, `If ${this.files.status} = 0& Then`, node, true);
+        this.emit(context, `Debug.Print ${values.length ? values.map(value => `(${value})`).join(' & ') : '""'}${name === 'write' ? ';' : ''}`, node); this.emit(context, 'End If', node, true); return;
+      }
+      if (name === 'inc' || name === 'dec') {
+        this.count(call, 1, 2); const target = call.args[0], type = this.typeOf(target, context); this.assignable(target, context); if (!isOrdinal(type)) this.fail('Inc/Dec require an ordinal variable', target);
+        const destination = this.freezeReference(target, context), change = call.args[1] ? this.expression(call.args[1], context) : '1&';
+        const ordinal = isCharacter(type) || isBoolean(type) ? this.callHelper('ord', [destination]) : destination;
+        const value = `(${ordinal} ${name === 'inc' ? '+' : '-'} ${change})`; this.emit(context, `${destination} = ${this.range(isCharacter(type) ? this.callHelper('chr', [value]) : isBoolean(type) ? `(${value} <> 0&)` : value, type, context, node)}`, node); return;
+      }
+      if (name === 'break' || name === 'continue') {this.count(call, 0); const loop = context.loops.at(-1); if (!loop) this.fail(`${name} is valid only inside a loop`, node); this.emit(context, `GoTo ${identifier(name === 'break' ? loop.end : loop.next)}`, node); return;}
+      if (name === 'exit') {this.count(call, 0); this.emit(context, `Exit ${context.procedure?.returnType ? 'Function' : 'Sub'}`, node); return;}
+      if (name === 'halt') {this.count(call, 0, 1); if (call.args.length) {const code = this.binder.constant(call.args[0], context.scope).value; if (code !== 0) this.fail('Nonzero Halt exit codes require the native/console process adapter', node, 'TP_UNSUPPORTED_HOST_IO');} this.emit(context, 'End', node); return;}
+      if (name === 'include' || name === 'exclude') {this.count(call, 2); this.assignable(call.args[0], context); if (this.typeOf(call.args[0], context).kind !== 'set') this.fail('Include/Exclude require a set variable', node); this.emit(context, `Call ${this.helper(name === 'include' ? 'setInclude' : 'setExclude')}(${this.expression(call.args[0], context, {lvalue: true})}, ${this.ordinal(call.args[1], context)})`, node); return;}
+      if (name === 'insert') {this.count(call, 3); this.assignable(call.args[1], context); const type = this.typeOf(call.args[1], context); if (type.kind !== 'string') this.fail('Insert requires a string destination', call.args[1]); this.emit(context, `Call ${this.helper('insert')}(${this.expression(call.args[0], context)}, ${this.expression(call.args[1], context, {lvalue: true})}, ${this.expression(call.args[2], context)}, ${number(type.capacity)})`, node); return;}
+      if (name === 'delete') {this.count(call, 3); this.assignable(call.args[0], context); this.emit(context, `Call ${this.helper('delete')}(${call.args.map((arg, i) => this.expression(arg, context, {lvalue: i === 0})).join(', ')})`, node); return;}
+      if (name === 'str') {this.count(call, 2); const arg = call.args[0], value = arg.kind === 'formatted' ? arg.value : arg, target = call.args[1], targetType = this.typeOf(target, context); this.assignable(target, context); if (targetType.kind !== 'string') this.fail('Str requires a string destination', target); const formatted = this.callHelper('format', [this.expression(value, context), arg.kind === 'formatted' ? this.expression(arg.width, context) : '-1&', arg.kind === 'formatted' && arg.precision ? this.expression(arg.precision, context) : '-1&', quote(this.typeOf(value, context).kind === 'real' ? 'real' : 'integer')]); this.emit(context, `${this.expression(target, context, {lvalue: true})} = ${this.range(formatted, targetType, context, node)}`, node); return;}
+      if (name === 'randomize') {this.count(call, 0); this.emit(context, 'Call Randomize()', node); return;}
+      if (name === 'val') {
+        this.count(call, 3); const target = call.args[1], error = call.args[2], targetType = this.typeOf(target, context), errorType = this.typeOf(error, context);
+        this.assignable(target, context); this.assignable(error, context);
+        if (!isNumeric(targetType) || !isNumeric(errorType) || errorType.kind === 'real') this.fail('Val requires a numeric destination and an integer error variable', node, 'TP_ARGUMENT_TYPE');
+        const text = this.temporary(context, PASCAL_TYPES.string, node, 'valText'), result = this.temporary(context, targetType.kind === 'real' ? PASCAL_TYPES.double : PASCAL_TYPES.longint, node, 'valValue'), code = this.temporary(context, PASCAL_TYPES.longint, node, 'valCode');
+        this.emit(context, `${text} = ${this.expression(call.args[0], context)}`, node, true); this.emit(context, `${result} = ${this.expression(target, context)}`, node, true);
+        this.emit(context, `Call ${this.helper(targetType.kind === 'real' ? 'valReal' : 'valInteger')}(${text}, ${result}, ${code}${targetType.kind === 'real' ? `, ${quote(key(targetType.name))}` : ''})`, node);
+        if (targetType.kind !== 'real') this.emit(context, `If ${code} = 0& And (${result} < ${number(targetType.low)} Or ${result} > ${number(targetType.high)}) Then ${code} = Len(${text})`, node, true);
+        this.emit(context, `${this.expression(error, context, {lvalue: true})} = ${this.range(code, errorType, context, node)}`, node, true);
+        this.emit(context, `If ${code} = 0& Then`, node, true); this.emit(context, `${this.expression(target, context, {lvalue: true})} = ${this.range(result, targetType, context, node)}`, node, true); this.emit(context, 'End If', node, true); return;
+      }
+      if (name === 'read' || name === 'readln') {const namedFile = call.args.length && this.typeOf(call.args[0], context).kind === 'file'; this.files.read(call, context, node, name === 'readln', !namedFile); return;}
+      if (['clrscr', 'gotoxy', 'textcolor', 'textbackground', 'window', 'delay', 'sound', 'nosound'].includes(name)) this.fail(`Crt.${call.callee.name} requires a terminal host adapter`, node, 'TP_UNSUPPORTED_CRT');
+    }
+    if (symbol?.foreign) {this.emit(context, `Call ${foreignCall(this, symbol, call.args, context, node, {statement: true})}`, node); return;}
+    const compiled = this.call(call, context); this.emit(context, `Call ${compiled}`, node);
+  }
+  emitVariable(symbol, context, modifier = 'Dim') {
+    if (symbol.type.kind === 'array' && symbol.type.open) this.fail('Open arrays are allowed only as routine parameters', symbol.node);
+    this.emit(context, `${modifier} ${this.declaration(symbol.vbName, symbol.type)}`, symbol.node, true);
+  }
+  initializeValue(destination, type, value, context, node) {
+    if (lowerObjectInitializer(this, destination, type, value, context, node)) return;
+    if (type.kind === 'array') {
+      if (value.kind !== 'aggregate') this.fail('Array typed constant requires a parenthesized initializer', value);
+      const shape = type.dimensions.map(d => d.high - d.low + 1), walk = (aggregate, depth, indices) => {
+        if (aggregate.kind !== 'aggregate' || aggregate.entries.length !== shape[depth]) this.fail('Array typed constant initializer does not match its bounds', aggregate, 'TP_INITIALIZER');
+        aggregate.entries.forEach((entry, index) => {const next = [...indices, type.dimensions[depth].low + index]; if (depth + 1 < shape.length) walk(entry.value, depth + 1, next); else this.initializeValue(`${destination}(${next.map(number).join(', ')})`, type.element, entry.value, context, entry.value);});
+      }; walk(value, 0, []); return;
+    }
+    if (type.kind === 'record') {
+      if (value.kind !== 'aggregate') this.fail('Record typed constant requires a field initializer', value); const initialized = new Set();
+      for (const entry of value.entries) {const field = type.fields.get(key(entry.field)); if (!field || initialized.has(key(entry.field))) this.fail('Invalid or duplicate record initializer field', entry.value, 'TP_INITIALIZER'); initialized.add(key(entry.field)); this.initializeValue(`${destination}.${identifier(field.name)}`, field.type, entry.value, context, entry.value);}
+      if (initialized.size !== type.fields.size) this.fail('Record typed constant must initialize every field', value, 'TP_INITIALIZER'); return;
+    }
+    if (!assignmentCompatible(type, this.typeOf(value, context))) this.fail('Typed initializer does not match its declared type', value, 'TP_INITIALIZER');
+    this.emit(context, `${destination} = ${this.range(this.expression(value, context), type, context, node)}`, node, true);
+  }
+  lower() {
+    const root = this.context(); root.writer.emit('Option Explicit', this.ast, true); root.writer.emit('Option Compare Binary', this.ast, true);
+    this.files.globals(root.writer, this.ast);
+    for (const type of this.binder.recordTypes) {
+      root.writer.emit(`${type.public && !this.input.form ? 'Public' : 'Private'} Type ${identifier(type.name)}`, type.node, true);
+      for (const field of type.fields.values()) root.writer.emit(this.declaration(field.name, field.type), field.node, true);
+      root.writer.emit('End Type', type.node, true);
+    }
+    for (const heap of generatePascalPointerHeaps(this.binder, type => this.storageType(type), (name, type) => this.declaration(name, type))) root.writer.emit(heap.source, heap.node, true);
+    const initial = this.context(), moduleValues = [...this.binder.scope.symbols.values()].filter(symbol => !symbol.builtIn);
+    for (const symbol of moduleValues) {
+      if (symbol.kind === 'constant' || symbol.kind === 'enumMember') root.writer.emit(`${symbol.public && !this.input.form ? 'Public' : 'Private'} Const ${identifier(symbol.name)} As ${this.storageType(symbol.type)} = ${this.literal(symbol.value, symbol.type)}`, symbol.node, true);
+      else if (symbol.kind === 'variable') {this.emitVariable(symbol, root, symbol.public ? 'Public' : 'Private'); const value = symbol.typedConstant ? symbol.node.value : symbol.node.initial; if (value) this.initializeValue(this.access(symbol, initial), symbol.type, value, initial, symbol.node);}
+    }
+    if (this.ast.moduleKind === 'unit' && this.ast.body) this.statement(this.ast.body, initial);
+    if (initial.writer.lines.length) {
+      this.initializer = '__PascalInitialize'; root.writer.emit('Private __PascalInitialized As Boolean', this.ast, true); root.writer.emit('Public Sub __PascalInitialize()', this.ast, true); root.writer.emit('If __PascalInitialized Then Exit Sub', this.ast, true); root.writer.emit('__PascalInitialized = True', this.ast, true); root.writer.append(initial.writer); root.writer.emit('End Sub', this.ast, true);
+    }
+    for (const procedure of this.binder.procedures) root.writer.append(this.lowerProcedure(procedure));
+    emitObjectDispatchers(this, root);
+    if (this.ast.moduleKind !== 'unit' && this.ast.body) {
+      if (this.binder.scope.symbols.has('main')) this.fail('Program block conflicts with an explicitly declared Main routine', this.ast.body, 'TP_MAIN_CONFLICT');
+      const main = this.context(); main.writer.emit('Public Sub Main()', this.ast.body, true); this.statement(this.ast.body, main); main.writer.emit('End Sub', this.ast.body, true); root.writer.append(main.writer);
+    }
+    for (const thunk of this.foreignThunks || []) root.writer.append(thunk);
+    const helperSource = getPascalRuntimeSource(this.helpers);
+    if (helperSource) root.writer.emit(helperSource, this.ast, true);
+    const fileSource = this.files.source(); if (fileSource) root.writer.emit(fileSource, this.ast, true);
+    this.writer = root.writer;
+    const allUses = this.ast.uses.flatMap(use => use.units.map(unit => unit.name));
+    return {name: this.input.name || this.ast.name, code: this.writer.source, generatedSource: this.writer.source, source: this.ast.source, sourceMap: this.writer.map, ast: this.ast, pascalAst: this.ast, language: 'pascal', pascal: {version: '7.0', kind: this.ast.moduleKind, unitName: this.ast.name, uses: allUses, interfaceUses: this.ast.uses.filter(use => use.section === 'interface').flatMap(use => use.units.map(unit => unit.name)), implementationUses: this.ast.uses.filter(use => use.section !== 'interface').flatMap(use => use.units.map(unit => unit.name)), initializer: this.initializer, helpers: [...this.helpers], symbols: this.symbolMetadata(), objectTypes: objectTypeMetadata(this.binder), objectDispatchers: objectDispatcherMetadata(this), hostRequirements: this.files.usesConsole ? ['consoleLineInput'] : [], directives: this.ast.directives.map(value => ({text: value.value, line: value.line}))}};
+  }
+  lowerProcedure(procedure) {
+    const context = this.context(procedure.localScope, procedure), kind = procedure.returnType ? 'Function' : 'Sub';
+    const params = procedure.params.map(param => `${param.byRef || isAggregate(param.type) ? 'ByRef' : 'ByVal'} ${this.declaration(!param.byRef && isAggregate(param.type) ? `__value_${param.name}` : param.vbName || param.name, param.type, true)}`);
+    for (const capture of procedure.captures) params.push(`ByRef ${this.declaration(capture.name, capture.symbol.type, true)}`);
+    this.emit(context, `${procedure.internalPublic || procedure.public ? 'Public' : 'Private'} ${kind} ${identifier(procedure.vbName)}(${params.join(', ')})${procedure.returnType ? ` As ${this.storageType(procedure.returnType)}` : ''}`, procedure.node, true);
+    for (const param of procedure.params) if (!param.byRef && isAggregate(param.type)) {
+      this.emit(context, `Dim ${this.declaration(param.name, param.type)}`, param, true);
+      if (lowerObjectValueParameter(this, param, identifier(`__value_${param.name}`), context)) continue;
+      if (param.type.kind === 'array' && param.type.open) {
+        const destination = identifier(param.name), source = identifier(`__value_${param.name}`), index = this.temporary(context, PASCAL_TYPES.longint, param, 'openIndex');
+        this.emit(context, `ReDim ${destination}(0& To UBound(${source}) - LBound(${source}))`, param, true);
+        this.emit(context, `For ${index} = 0& To UBound(${destination})`, param, true);
+        this.emit(context, `${destination}(${index}) = ${source}(${index} + LBound(${source}))`, param, true);
+        this.emit(context, `Next ${index}`, param, true);
+      }
+      else if (param.type.kind === 'array') this.copyArray(identifier(param.name), identifier(`__value_${param.name}`), param.type, context, param);
+      else this.emit(context, `${identifier(param.name)} = ${identifier(`__value_${param.name}`)}`, param, true);
+    }
+    for (const symbol of procedure.localScope.symbols.values()) {
+      if (symbol.kind === 'constant' || symbol.kind === 'enumMember') this.emit(context, `Const ${identifier(symbol.name)} As ${this.storageType(symbol.type)} = ${this.literal(symbol.value, symbol.type)}`, symbol.node, true);
+      else if (symbol.kind === 'variable') {
+        this.emitVariable(symbol, context, symbol.typedConstant ? 'Static' : 'Dim'); const value = symbol.typedConstant ? symbol.node.value : symbol.node.initial;
+        if (value) {
+          if (symbol.typedConstant) {const guard = identifier(`__PascalInit_${symbol.name}`); this.emit(context, `Static ${guard} As Boolean`, symbol.node, true); this.emit(context, `If Not ${guard} Then`, symbol.node, true); this.emit(context, `${guard} = True`, symbol.node, true); this.initializeValue(this.access(symbol, context), symbol.type, value, context, symbol.node); this.emit(context, 'End If', symbol.node, true);}
+          else this.initializeValue(this.access(symbol, context), symbol.type, value, context, symbol.node);
+        }
+      }
+    }
+    initializeObjectMethod(this, procedure, context);
+    this.statement(procedure.definition.body, context);
+    finalizeObjectMethod(this, procedure, context);
+    this.emit(context, `End ${kind}`, procedure.definition, true); return context.writer;
+  }
+  symbolMetadata() {
+    const summarize = scope => [...scope.symbols.values()].filter(symbol => !symbol.builtIn && symbol.kind !== 'type').map(symbol => ({name: symbol.name, kind: symbol.kind, vbName: symbol.vbName || symbol.name, type: symbol.type?.name || symbol.type?.kind || symbol.returnType?.name || null, line: symbol.node?.loc?.line || 1, column: symbol.node?.loc?.column || 1, public: !!symbol.public}));
+    return {module: summarize(this.binder.scope), procedures: Object.fromEntries(this.binder.procedures.map(procedure => [key(procedure.name), summarize(procedure.localScope)]))};
+  }
+}
+
+export function lowerPascalModule(input, options = {}) {return new PascalLowerer(input, options).lower();}
+
+export function compilePascalModule(input, options = {}) {
+  input = typeof input === 'string' ? {name: options.name || 'PascalModule', code: input} : input;
+  const lowered = lowerPascalModule(input, options); let module;
+  try {module = compileModule({...input, code: lowered.generatedSource, retainSyntax: input.retainSyntax ?? options.retainSyntax});}
+  catch (error) {const mapped = lowered.sourceMap[(error.line || 1) - 1]; if (mapped) {error.line = mapped.line; error.column = mapped.column; error.endLine = mapped.endLine; error.endColumn = mapped.endColumn;} error.source = input.name; throw error;}
+  const remap = value => {if (!value || !value.line) return; const mapped = lowered.sourceMap[value.line - 1]; if (!mapped) return; value.generatedLine = value.line; value.line = mapped.line; value.column = mapped.column; value.endColumn = mapped.endLine === mapped.line ? mapped.endColumn : undefined; if (mapped.internal && value.sequencePoint !== undefined) value.sequencePoint = false;};
+  for (const declaration of module.declarations) remap(declaration);
+  for (const fields of Object.values(module.types)) for (const field of fields) remap(field);
+  for (const procedure of module.procedures.values()) {remap(procedure); for (const instruction of procedure.code) {remap(instruction); for (const declaration of instruction.decls || []) remap(declaration);} if (procedure.statements) for (const statement of procedure.statements) remap(statement);}
+  Object.assign(module, {source: lowered.source, generatedSource: lowered.generatedSource, sourceMap: lowered.sourceMap, pascalAst: lowered.ast, language: 'pascal', pascal: lowered.pascal});
+  return module;
+}
+
+/** Read-only debugger bridge; never executes the authored expression. */
+export function lowerPascalExpression(source, {module = null, procedure = null, project = null} = {}) {
+  const input = {name: module?.name || 'PascalExpression', code: module?.source || module?.code || '', form: module?.form}, lowerer = new PascalLowerer(input, {project});
+  const selected = typeof procedure === 'string' ? lowerer.binder.procedures.find(value => key(value.name) === key(procedure) || key(value.vbName) === key(procedure)) : lowerer.binder.procedures.find(value => key(value.vbName) === key(procedure?.name || ''));
+  const parser = new PascalParser({name: input.name, code: source}); const expression = parser.expression(); if (parser.peek().type !== 'eof') parser.fail('Unexpected trailing tokens in Pascal expression');
+  const context = lowerer.context(selected?.localScope || lowerer.binder.scope, selected); context.pure = true;
+  return parseSharedExpression(lowerer.expression(expression, context));
+}

@@ -2,6 +2,8 @@ import {el,clone,lower} from '../core/core.js';
 import {wordAt,maskSource} from './intelligence.js';
 import {positionAt,offsetAt,textChange,mapOffset} from './projection.js';
 import {moveSourceSelection} from './find-index.js';
+import {moduleLanguage} from '../project/language.js';
+import {pascalMasked} from './pascal-service.js';
 
 /** Side-effect-free debugger hover. No project procedure, property getter or
  * constructor is executed: the IDE supplies the guarded storage inspector. */
@@ -17,7 +19,7 @@ export class CodeAssistance {
     this.drag.register(this.editor,pane);
     this.listen(pane.input,'pointermove',event=>{
       if(event.buttons||event.pointerType==='touch'||!this.editor.appearance.autoDataTips||this.ide.runState!=='paused'){this.hide();return;}
-      const offset=pane.virtualizer.hit(event.clientX,event.clientY),word=wordAt(this.editor.text,offset);
+      const offset=pane.virtualizer.hit(event.clientX,event.clientY),word=wordAt(this.editor.text,offset,moduleLanguage(this.editor.module,this.ide.project));
       const key=this.editor.module?.id+':'+word.start+':'+word.text;
       if(this.hoverKey===key)return;this.hide();this.hoverKey=key;
       this.timer=setTimeout(()=>this.showAt(offset,pane,{x:event.clientX,y:event.clientY}),400);
@@ -27,8 +29,9 @@ export class CodeAssistance {
   async showAt(offset,pane=this.editor.activePane,point=null) {
     this.hide();const editor=this.editor,ide=this.ide,workbench=ide.debuggerWindows;
     if(editor.disposed||!editor.appearance.autoDataTips||ide.runState!=='paused'||!workbench)return null;
-    const position=positionAt(editor.index,offset),word=wordAt(editor.text,offset),line=editor.index.lines[position.line-1],local=word.start-editor.index.starts[position.line-1];
-    if(!word.text||word.text.length>4096||!maskSource(line).slice(Math.max(0,local),Math.max(0,local)+word.text.length).trim())return null;
+    const language=moduleLanguage(editor.module,ide.project),position=positionAt(editor.index,offset),word=wordAt(editor.text,offset,language),line=editor.index.lines[position.line-1],local=word.start-editor.index.starts[position.line-1];
+    const masked=language==='pascal'?pascalMasked(editor.text).slice(editor.index.starts[position.line-1],editor.index.starts[position.line-1]+line.length):maskSource(line);
+    if(!word.text||word.text.length>4096||!masked.slice(Math.max(0,local),Math.max(0,local)+word.text.length).trim())return null;
     const frame=ide.stack[workbench.frameIndex??ide.stack.length-1],procedure=editor.procedureIndex.filter(p=>p.line<=position.line).at(-1);
     if(!frame||lower(frame.module)!==lower(editor.module?.name)||procedure&&lower(procedure.name)!==lower(frame.procedure))return null;
     const serial=++this.serial,text=editor.text,pauseId=workbench.pauseId,frameIndex=workbench.frameIndex;
