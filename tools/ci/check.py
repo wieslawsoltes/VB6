@@ -106,8 +106,10 @@ def audit(root=ROOT):
         raise ValueError('Missing GPU/display combination')
     if set(jobs['native-com-ole']['strategy']['matrix']['architecture']) != {'x86', 'x64'}:
         raise ValueError('Missing Windows architecture')
-    if set(jobs['macos']['strategy']['matrix']['os']) != {'ubuntu-24.04', 'macos-14', 'macos-15', 'macos-26'}:
+    if set(jobs['macos']['strategy']['matrix']['os']) != {'ubuntu-24.04', 'macos-15', 'macos-26'}:
         raise ValueError('Missing native AOT platform')
+    if set(jobs['macos-browser-native']['strategy']['matrix']['os']) != {'macos-15', 'macos-26'}:
+        raise ValueError('Browser-exported native AOT must execute on both supported Apple Silicon platforms')
     if jobs['macos-browser-native']['needs'] != ['authoring-exports']:
         raise ValueError('Native execution must depend on browser exports')
     for owner in ('linux', 'linux-browser-native', 'linux-native-distribution'):

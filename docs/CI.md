@@ -168,3 +168,18 @@ the flag can reject requests before service-worker fetch dispatch. This is not
 certification that WebKit's offline emulation works. The report records the
 transport distinction, worker response and negative control explicitly. All
 update, cache isolation, integrity, actual ZIP and network-only API checks remain.
+
+## Supported Apple Silicon runners
+
+Native AOT and execution of browser-exported applications run on both `macos-15`
+and `macos-26`, the supported standard Apple Silicon images. The portable helper
+oracle continues to run on Ubuntu. Every native execution, signature, archive,
+AppKit and macOS 26 appearance check remains required on its existing owner.
+The coverage audit requires both macOS platforms for both native job families.
+
+The retired `macos-14` jobs were removed after GitHub's scheduled image brownout
+cancelled both jobs before a runner or test step started. This does not change
+the compiler's deployment target or assert new macOS 14 compatibility evidence;
+macOS 14 is no longer qualified by hosted CI. GitHub retires that image on
+November 2, 2026. See the [runner retirement notice](https://github.com/actions/runner-images/issues/13518)
+and [official image/architecture table](https://github.com/actions/runner-images#available-images).

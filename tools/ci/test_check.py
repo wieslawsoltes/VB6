@@ -26,6 +26,15 @@ class WorkflowAuditTests(unittest.TestCase):
         result=check.audit(self.root)
         self.assertEqual(result['preservedEntrypoints'],89)
         self.assertEqual(result['linuxNodeTests'],sorted(p.name for p in (self.root/'tests').glob('linux-*.test.mjs')))
+    def test_retired_macos_runner_cannot_return(self):
+        for owner in ('macos', 'macos-browser-native'):
+            with self.subTest(owner=owner):
+                self.reject(lambda w:w['jobs'][owner]['strategy']['matrix']['os'].append('macos-14'))
+    def test_each_supported_macos_platform_is_required(self):
+        for owner in ('macos', 'macos-browser-native'):
+            for platform in ('macos-15', 'macos-26'):
+                with self.subTest(owner=owner, platform=platform):
+                    self.reject(lambda w:w['jobs'][owner]['strategy']['matrix']['os'].remove(platform))
     def test_node_native_runtime_platform_required(self):
         self.reject(lambda w:w['jobs']['node'].update({'runs-on':'ubuntu-latest'}))
     def test_node_native_runtime_dependency_required(self):
