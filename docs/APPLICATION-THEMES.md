@@ -2,8 +2,11 @@
 
 **Tools → Options → General → Appearance → Application Theme** selects the
 project's appearance. Choose **OK** to save it, or **Cancel** to leave the
-project, running application, and undo history unchanged. Windows Classic is the
+project, running application, and undo history unchanged. Windows Standard (2000) is the
 default for new projects and for older projects without an appearance setting.
+Explicit saved theme choices remain unchanged. The selected palette is also
+present in exported HTML before the runtime starts. Native Win32 controls
+continue to use the operating system theme.
 
 ## Available styles
 

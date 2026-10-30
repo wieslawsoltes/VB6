@@ -247,6 +247,10 @@ def number_lab(page):
     dialog.get_by_role('button', name='Open', exact=True).click()
     page.wait_for_function('vb6Studio.project.name==="PascalNumberLab"')
     check(page.evaluate('vb6Studio.project.language==="pascal"&&vb6Studio.project.modules.length===2'))
+    check(page.locator('html').get_attribute('data-ide-theme') == 'standard',
+          'Number Lab changed the initial IDE appearance')
+    check(page.locator('.designer-scroll').get_attribute('data-vb-theme') == 'standard',
+          'Number Lab did not inherit the default application appearance')
     no_errors(page)
     command(page, 'run')
     frame = page.frame_locator('.runtime-window iframe')
@@ -281,13 +285,33 @@ def number_lab(page):
     exported = page.context.new_page()
     exported.goto(url(application))
     number_lab_results(exported, 10, 55, 55)
+    check(exported.locator('#app').get_attribute('data-vb-theme') == 'standard',
+          'Number Lab HTML export changed its application appearance')
     exported.locator('[data-control="SaveButton"]').click()
     exported.locator('[data-control="StatusLabel"]').filter(has_text='Saved Pascal-Results.txt.').wait_for()
     saved = exported.evaluate('vb6Application.fs.read("/Pascal-Results.txt")')
     check(saved == 'TURBO PASCAL NUMBER LAB\r\nN = 10\r\nFibonacci(N) = 55\r\n1 + ... + N = 55\r\n', saved)
     check(exported.evaluate('vb6Application.fs.handles.size') == 0, 'Pascal save leaked an open file')
+    exported.evaluate('globalThis.numberLabClosedHost=vb6Application')
+    exported.locator('.vb-form [data-caption-action="close"]').click()
+    exported.wait_for_function('!document.querySelector("[data-desktop-action=launch]").disabled')
+    exported.locator('[data-desktop-action="files"]').click()
+    with exported.expect_download() as pending:
+        exported.get_by_role('button', name='Download Pascal-Results.txt', exact=True).click()
+    check(pending.value.failure() is None and Path(pending.value.path()).read_bytes() == saved.encode('ascii'),
+          'Private-disk download changed the Pascal result bytes')
+    exported.locator('[data-desktop-action="close-files"]').click()
+    exported.locator('[data-desktop-action="launch"]').click()
+    number_lab_results(exported, 10, 55, 55)
+    check(exported.evaluate('vb6Application!==numberLabClosedHost&&numberLabClosedHost.disposed'),
+          'Pascal relaunch retained or duplicated its previous host')
+    check(exported.evaluate('vb6Application.fs.read("/Pascal-Results.txt")') == saved,
+          'Pascal relaunch lost the saved private-disk result')
+    check(exported.locator('[data-desktop-action="launch"]').is_disabled(),
+          'Running Pascal application can be launched twice')
     exported.close()
     return {'units': 2, 'sourceEntries': entries, 'savedText': saved,
+            'defaultTheme': 'standard', 'privateDiskDownloadExact': True, 'relaunchPreservesFiles': True,
             'exportSHA256': hashlib.sha256(application.read_bytes()).hexdigest()}
 
 

@@ -1,3 +1,4 @@
+import {APPLICATION_DESKTOP_CSS} from './desktop-css.js';
 import {compileProject} from '../language/compiler.js';
 import {VERSION} from '../core/core.js';
 import {ApplicationExportError, exportDiagnostic, exportFailure} from './diagnostics.js';
@@ -14,7 +15,7 @@ export function createApplicationExporter({runtimeSource, runtimeCSS, version = 
   if (typeof runtimeSource !== 'string' || !runtimeSource.trim() || typeof runtimeCSS !== 'string' || typeof version !== 'string' || typeof compile !== 'function') {
     throw exportFailure('EXPORT_INVALID_RUNTIME', 'Expected runtime source, CSS, version and compiler', 'runtime');
   }
-  const css = APPLICATION_SHELL_CSS + '\n' + runtimeCSS;
+  const css = APPLICATION_SHELL_CSS + '\n' + APPLICATION_DESKTOP_CSS + '\n' + runtimeCSS;
   const prepare = (project, options, document) => ({...prepareApplicationExport(project, options, compile), document: documentSettings(document), version, css});
   const manifestFor = result => ({
     schema: 1, target: 'browser', runtimeVersion: version, project: {id: result.project.id, name: result.project.name},

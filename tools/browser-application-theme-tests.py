@@ -231,7 +231,7 @@ class ApplicationThemes(MacOSCompositeChecks, MacOS26CompatibilityChecks, X11App
   self.options(ide);ide.get_by_label('Application theme',exact=True).select_option('fluent-dark');ide.locator('.ide-dialog').get_by_role('button',name='OK',exact=True).click()
   frame.wait_for_function('document.querySelector("#app").dataset.vbTheme==="fluent-dark"')
   self.assertTrue(frame.evaluate('originalVM===vb6Application.vm&&runningControls.every((c,i)=>c===vb6Application.forms[0].controls[i])'))
-  self.assertEqual(text.input_value(),'Unsaved runtime text');self.assertEqual(ide.locator('html').get_attribute('data-ide-theme'),'classic')
+  self.assertEqual(text.input_value(),'Unsaved runtime text');self.assertEqual(ide.locator('html').get_attribute('data-ide-theme'),'standard')
   ide.evaluate('()=>vb6Studio.stop(false)');self.record('authenticated live Options bridge keeps VM and controls; wrong token ignored')
  def test_detached_ide_icons_follow_the_owner(self):
   ide=self.open_ide()

@@ -50,12 +50,13 @@ def ready(page):
     wait_for_export(page, 'globalThis.vb6ApplicationStatus?.phase === "ready"')
     check(page.evaluate('vb6Application.vm.state !== "error"'), 'Failed VM reported ready')
     check(page.locator('#vb6-startup').is_hidden(), 'Loading banner remained after success')
-def run_case(browser, name, file, origin, verify=None, failure=False):
+def run_case(browser, name, file, origin, verify=None, failure=False, prepare=None):
     print('Testing ' + name, flush=True)
     context = browser.new_context(viewport={'width': 1100, 'height': 850})
     page = context.new_page(); page.set_default_timeout(25000)
     errors = []; page.on('pageerror', lambda error: errors.append(str(error)))
     try:
+        if prepare: prepare(page)
         load(page, file, origin)
         if failure:
             wait_for_export(page, 'globalThis.vb6ApplicationStatus?.phase === "error"')
@@ -68,6 +69,121 @@ def run_case(browser, name, file, origin, verify=None, failure=False):
         check(not errors, str(errors))
         results.append({'case': name, 'passed': True})
     finally: context.close()
+
+def desktop_files(page):
+    # Save through the authored Northwind event, then use the desktop after the
+    # last form has actually unloaded. Compare downloaded bytes, not just names.
+    page.locator('[data-control="cmdSave"]').click()
+    page.get_by_role('button', name='OK', exact=True).click()
+    expected = bytes(page.evaluate('Array.from(vb6Application.fs.readBytes("/Orders/Order-1001.txt"))'))
+    check(b'TOTAL: $107.00' in expected, 'Northwind did not save its full order')
+    binary = bytes([0, 255, 128, 13, 10, 0, 42])
+    page.evaluate('''bytes=>{
+      const fs=vb6Application.fs;
+      fs.makeDirectory('/Exports');fs.makeDirectory('/Exports/Empty');
+      fs.writeBytes('/Exports/check.bin',bytes);
+      fs.writeBytes('/Exports/retired.bin',[1]);
+      vb6Application.settings.desktopTest=42;
+      globalThis.closedHost=vb6Application;globalThis.relaunchEvents=0;
+      addEventListener('vb6:ready',()=>{relaunchEvents++;});
+    }''', list(binary[:-1]))
+    page.locator('[data-control="cmdClose"]').click()
+    wait_for_export(page, '!document.querySelector("[data-desktop-action=launch]").disabled')
+    check(page.evaluate('[...vb6Application.vm.formInstances].every(instance=>!instance.loaded)'),
+          'Desktop offered relaunch while a form was still loaded')
+    page.locator('[data-desktop-action="files"]').click()
+    page.get_by_role('button', name='Orders', exact=True).click()
+    with page.expect_download() as pending:
+        page.get_by_role('button', name='Download Order-1001.txt', exact=True).click()
+    check(pending.value.failure() is None and Path(pending.value.path()).read_bytes() == expected,
+          'Order download changed its ANSI bytes')
+    page.get_by_role('button', name='Up', exact=True).click()
+    page.get_by_role('button', name='Exports', exact=True).click()
+    target = page.get_by_role('button', name='Download check.bin', exact=True)
+    target.focus()
+    page.evaluate('globalThis.desktopDownloadTarget=document.activeElement')
+    target.hover()
+    with page.expect_download() as pending:
+        page.mouse.down()
+        try:
+            retained = page.evaluate('''async bytes=>{
+              const fs=vb6Application.fs;
+              fs.remove('/Exports/check.bin');fs.writeBytes('/Exports/check.bin',bytes);
+              fs.remove('/Exports/retired.bin');fs.writeBytes('/Exports/aaa-added.txt',[65]);
+              vb6Application.stage.style.paddingLeft='1px';
+              // Let the mutation observer enqueue and complete its own refresh.
+              await new Promise(resolve=>setTimeout(resolve,0));
+              await new Promise(resolve=>setTimeout(resolve,0));
+              return desktopDownloadTarget.isConnected&&document.activeElement===desktopDownloadTarget;
+            }''', list(binary))
+            check(retained, 'Application repaint replaced or unfocused the active disk download button')
+        finally:
+            page.mouse.up()
+    check(Path(pending.value.path()).read_bytes() == binary, 'Binary file download changed bytes')
+    wait_for_export(page, '!document.querySelector(\'[data-disk-path="/Exports/retired.bin"]\')&&!!document.querySelector(\'[data-disk-path="/Exports/aaa-added.txt"]\')')
+    check(page.evaluate('desktopDownloadTarget.isConnected&&document.activeElement===desktopDownloadTarget'),
+          'Completed disk refresh discarded the existing download control or its keyboard focus')
+    check(page.locator('[data-disk-path="/Exports/retired.bin"]').count() == 0, 'Removed file remained in the disk listing')
+    check(page.locator('[data-disk-path="/Exports/aaa-added.txt"]').count() == 1, 'New file was missing from the disk listing')
+    check(page.locator('[data-disk-path="/Exports/check.bin"] td').nth(1).inner_text() == str(len(binary)) + ' bytes',
+          'Replaced file retained its previous byte count')
+    with page.expect_download() as pending:
+        page.get_by_role('button', name='Download all (.zip)', exact=True).click()
+    with zipfile.ZipFile(pending.value.path()) as archive:
+        check(archive.read('Orders/Order-1001.txt') == expected, 'ZIP changed the saved order')
+        check(archive.read('Exports/check.bin') == binary, 'ZIP changed binary bytes')
+        check(archive.read('Exports/aaa-added.txt') == b'A', 'ZIP missed a file created during a disk refresh')
+        check('Exports/retired.bin' not in archive.namelist(), 'ZIP retained a removed file')
+        check('Exports/Empty/' in archive.namelist(), 'ZIP lost the empty directory')
+    page.screenshot(path=str(REPORT / 'application-private-disk.png'), animations='disabled')
+    page.locator('[data-desktop-action="close-files"]').click()
+    page.evaluate('''()=>{
+      const mount=VB6Runtime.mountApplication;let failNext=true;
+      VB6Runtime.mountApplication=(...args)=>{
+        if(failNext){failNext=false;return Promise.reject(new Error('Temporary restart failure'));}
+        return mount(...args);
+      };
+    }''')
+    page.locator('[data-desktop-action="launch"]').click()
+    wait_for_export(page, 'vb6ApplicationStatus.phase==="error"')
+    check(page.evaluate('vb6Application===closedHost&&closedHost.disposed'),
+          'Failed relaunch lost access to the last closed host')
+    page.locator('[data-desktop-action="launch"]').click()
+    wait_for_export(page, 'vb6Application!==closedHost&&vb6ApplicationStatus.phase==="ready"')
+    ready(page)
+    check(page.evaluate('closedHost.disposed&&vb6Application.settings.desktopTest===42'),
+          'Relaunch did not dispose the previous host or preserve settings')
+    check(bytes(page.evaluate('Array.from(vb6Application.fs.readBytes("/Orders/Order-1001.txt"))')) == expected,
+          'Relaunch lost the saved order')
+    check(bytes(page.evaluate('Array.from(vb6Application.fs.readBytes("/Exports/check.bin"))')) == binary,
+          'Relaunch lost binary files')
+    check(page.evaluate('vb6Application.fs.directories.has("/Exports/Empty")'), 'Relaunch lost empty folders')
+    check(page.locator('[data-desktop-action="launch"]').is_disabled(), 'Running app can be launched twice')
+    check(page.evaluate('async()=>{const host=vb6Application;return await vb6RestartApplication()===host&&relaunchEvents===1;}'),
+          'A second launch duplicated the running application')
+
+def deny_storage(page):
+    page.add_init_script('''Object.defineProperty(window,'localStorage',{
+      configurable:true,get(){throw new DOMException('Storage denied by test policy','SecurityError');}
+    });''')
+
+def desktop_focus(page):
+    page.evaluate('vb6Application.fs.write("/focus.txt","keep")')
+    page.locator('[data-desktop-action="files"]').click()
+    page.get_by_role('button', name='Download focus.txt', exact=True).focus()
+    page.evaluate('''()=>{
+      globalThis.focusedDownload=document.activeElement;
+      globalThis.clockTextBefore=document.querySelector('[data-control="lblTime"]').textContent;
+    }''')
+    wait_for_export(page, 'document.querySelector("[data-control=lblTime]").textContent!==clockTextBefore')
+    # Observe the scheduled desktop refresh after the actual timer update.
+    page.evaluate('()=>new Promise(resolve=>setTimeout(resolve,0))')
+    check(page.evaluate('focusedDownload.isConnected&&document.activeElement===focusedDownload'),
+          'A running timer destroyed keyboard focus in the unchanged private-disk listing')
+    with page.expect_download() as pending:
+        page.keyboard.press('Enter')
+    check(Path(pending.value.path()).read_bytes() == b'keep', 'Focused download did not retain its action')
+
 try:
     with sync_playwright() as p:
         launch = {'headless': True}
@@ -79,6 +195,10 @@ try:
         for origin in origins:
             for sample in catalog:
                 run_case(browser, origin + '-split-' + sample, REPORT / sample / 'index.html', origin)
+            run_case(browser, origin + '-desktop-files-and-relaunch', REPORT / 'orders/index.html', origin, desktop_files)
+            run_case(browser, origin + '-desktop-denied-storage', REPORT / 'desktop-persist/index.html', origin,
+                     desktop_files, prepare=deny_storage)
+            run_case(browser, origin + '-desktop-timer-preserves-focus', REPORT / 'clock/index.html', origin, desktop_focus)
             run_case(browser, origin + '-gallery', REPORT / 'gallery/index.html', origin,
                      lambda page: check(page.evaluate('vb6Application.forms[0].controls.length >= 40'), 'Control gallery missing controls'))
             def adapter(page):
@@ -132,6 +252,10 @@ try:
             page.goto(base + '/csp/adapter/index.html'); ready(page)
             check(not violations, str(violations))
             results.append({'case': 'external-script-CSP', 'passed': True})
+            page.goto(base + '/csp/orders/index.html'); ready(page)
+            desktop_files(page)
+            check(not violations, str(violations))
+            results.append({'case': 'desktop-files-and-relaunch-CSP', 'passed': True})
             context.close()
         browser.close()
 except Exception as error:

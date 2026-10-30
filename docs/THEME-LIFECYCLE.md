@@ -1,6 +1,6 @@
 # Theme lifecycle and accessibility
 
-This work builds on main `638b5f4a6e5e9feda7e30b435a3720124725ff7c` (tree `8c93739b616d698793ed0761beed2ca609ca57c9`). It preserves Classic as the default, independent IDE and project preferences, all nine registered palettes, authored RGB/font/geometry values, existing native caption hosts and the macOS reference measurements.
+This work builds on main `638b5f4a6e5e9feda7e30b435a3720124725ff7c` (tree `8c93739b616d698793ed0761beed2ca609ca57c9`). The initial audit used Classic as the default; the current initial palette is Windows Standard (2000). It preserves explicit saved themes, independent IDE and project preferences, all nine registered palettes, authored RGB/font/geometry values, existing native caption hosts and the macOS reference measurements.
 
 ## Audited gaps and acceptance criteria
 
