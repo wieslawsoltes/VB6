@@ -33,7 +33,7 @@ export const nativeDynamicEventMethods={
    x.jump(drop).label(another);
   }
   x.jump(drop).label(color).value(arg(-56)).mov('ebx',at('eax',8)).testOperand('ebx','ebx').branch('e',drop);
-  this.nativeControlColors=true;x.push(arg(16)).pushOperand('ebx').call('native:control:colors').jump(handled);
+  this.nativeControlColors=true;x.push(arg(20)).push(arg(16)).pushOperand('ebx').call('native:control:colors').jump(handled);
   x.label(drop).push(arg(-56)).call(this.controlProcedure('Release')).jump(next);
   x.label(handled).mov(at('ebp',-60),'eax').push(arg(-56)).call(this.controlProcedure('Release')).value(arg(-60)).jump(exit).label(next);
  },
@@ -46,7 +46,10 @@ export const nativeDynamicEventMethods={
    .value({memory:module.dynamicRegistry,addend:16}).test().branch('ne',fallback)
    .value(mem(module.loaded)).test().branch('e',fallback)
    .value(arg(-40)).testOperand(at('eax',20),1).branch('ne',fallback);
-  const notFrame=x.unique();x.cmp(at('eax',40),6).branch('ne',notFrame).value(arg(12));
+  const notFrame=x.unique(),frameForward=x.unique();x.cmp(at('eax',40),6).branch('ne',notFrame).value(arg(12)).compare(0x14).branch('ne',frameForward);
+  this.nativeControlColors=true;
+  x.value(arg(-40)).mov('ebx',at('eax',8)).push(arg(8)).push(arg(16)).pushOperand('ebx').call('native:control:erase').jump(exit);
+  x.label(frameForward).value(arg(12));
   for(const msg of [0x111,0x4e,0x114,0x115,0x2b,0x132,0x133,0x134,0x135,0x136,0x137,0x138])x.compare(msg).branch('e',forward);
   x.label(notFrame);
   for(const group of module.controlArrays.values()){
